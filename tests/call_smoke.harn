@@ -1,0 +1,343 @@
+import { call } from "../src/lib"
+
+@complexity(allow)
+pipeline default() {
+  egress_policy({allow: ["stripe-api.test"], default: "deny"})
+  http_mock_clear()
+  const base = "https://stripe-api.test"
+  const key = "sk_test_123"
+  const common = {api_base_url: base, api_key: key}
+  // customer.create -> POST /v1/customers, form-encoded, alphabetical keys.
+  http_mock(
+    "POST",
+    base + "/v1/customers",
+    {status: 200, body: "{\"id\":\"cus_1\",\"object\":\"customer\"}"},
+  )
+  const customer = call(
+    "customer.create",
+    common + {email: "ada@example.test", metadata: {plan: "pro"}, name: "Ada Lovelace"},
+  )
+  assert_eq(customer.id, "cus_1", "customer.create returns id")
+  assert_eq(
+    http_mock_calls()[0].body,
+    "email=ada%40example.test&metadata[plan]=pro&name=Ada%20Lovelace",
+    "customer.create form body",
+  )
+  // customer.get -> GET /v1/customers/{id}.
+  http_mock_clear()
+  http_mock("GET", base + "/v1/customers/cus_1", {status: 200, body: "{\"id\":\"cus_1\"}"})
+  assert_eq(call("customer.get", common + {id: "cus_1"}).id, "cus_1", "customer.get returns id")
+  assert_eq(http_mock_calls()[0].method, "GET", "customer.get uses GET")
+  // checkout_session.create -> POST /v1/checkout/sessions with nested body.
+  http_mock_clear()
+  http_mock(
+    "POST",
+    base + "/v1/checkout/sessions",
+    {status: 200, body: "{\"id\":\"cs_1\",\"url\":\"https://checkout.stripe.test/cs_1\"}"},
+  )
+  const session = call(
+    "checkout_session.create",
+    common
+      + {
+      allow_promotion_codes: true,
+      cancel_url: "https://x.test/c",
+      client_reference_id: "ref_1",
+      customer: "cus_1",
+      line_items: [{price: "price_1", quantity: 2}, {price: "price_metered"}],
+      metadata: {plan: "pro"},
+      mode: "subscription",
+      subscription_metadata: {team: "acme"},
+      success_url: "https://x.test/s",
+    },
+  )
+  assert_eq(session.id, "cs_1", "checkout_session.create returns id")
+  assert_eq(
+    http_mock_calls()[0].body,
+    "allow_promotion_codes=true&cancel_url=https%3A%2F%2Fx.test%2Fc&client_reference_id=ref_1"
+      + "&customer=cus_1&line_items[0][price]=price_1&line_items[0][quantity]=2"
+      + "&line_items[1][price]=price_metered&metadata[plan]=pro&mode=subscription"
+      + "&subscription_data[metadata][team]=acme&success_url=https%3A%2F%2Fx.test%2Fs",
+    "checkout_session.create form body",
+  )
+  // A metered line item omits quantity.
+  http_mock_clear()
+  http_mock("POST", base + "/v1/checkout/sessions", {status: 200, body: "{\"id\":\"cs_2\"}"})
+  call(
+    "checkout_session.create",
+    common
+      + {
+      cancel_url: "https://x.test/c",
+      line_items: [{price: "price_metered"}],
+      success_url: "https://x.test/s",
+    },
+  )
+  assert_eq(
+    http_mock_calls()[0].body,
+    "cancel_url=https%3A%2F%2Fx.test%2Fc&line_items[0][price]=price_metered&mode=subscription"
+      + "&success_url=https%3A%2F%2Fx.test%2Fs",
+    "metered line item omits quantity, mode defaults to subscription",
+  )
+  // billing_portal_session.create -> POST /v1/billing_portal/sessions.
+  http_mock_clear()
+  http_mock(
+    "POST",
+    base + "/v1/billing_portal/sessions",
+    {status: 200, body: "{\"id\":\"bps_1\",\"url\":\"https://portal.stripe.test/bps_1\"}"},
+  )
+  const portal = call(
+    "billing_portal_session.create",
+    common + {customer: "cus_1", return_url: "https://x.test/account"},
+  )
+  assert_eq(portal.id, "bps_1", "billing_portal_session.create returns id")
+  assert_eq(
+    http_mock_calls()[0].body,
+    "customer=cus_1&return_url=https%3A%2F%2Fx.test%2Faccount",
+    "billing_portal_session.create form body",
+  )
+  // subscription.get -> GET /v1/subscriptions/{id}.
+  http_mock_clear()
+  http_mock(
+    "GET",
+    base + "/v1/subscriptions/sub_1",
+    {status: 200, body: "{\"id\":\"sub_1\",\"status\":\"active\"}"},
+  )
+  assert_eq(
+    call("subscription.get", common + {id: "sub_1"}).status,
+    "active",
+    "subscription.get status",
+  )
+  // subscription.update -> POST /v1/subscriptions/{id} with body passthrough.
+  http_mock_clear()
+  http_mock("POST", base + "/v1/subscriptions/sub_1", {status: 200, body: "{\"id\":\"sub_1\"}"})
+  call(
+    "subscription.update",
+    common + {body: {cancel_at_period_end: true, metadata: {tier: "gold"}}, id: "sub_1"},
+  )
+  assert_eq(
+    http_mock_calls()[0].body,
+    "cancel_at_period_end=true&metadata[tier]=gold",
+    "subscription.update passthrough body",
+  )
+  // subscription.cancel at_period_end -> POST with cancel_at_period_end=true.
+  http_mock_clear()
+  http_mock(
+    "POST",
+    base + "/v1/subscriptions/sub_1",
+    {status: 200, body: "{\"id\":\"sub_1\",\"cancel_at_period_end\":true}"},
+  )
+  call("subscription.cancel", common + {at_period_end: true, id: "sub_1"})
+  assert_eq(http_mock_calls()[0].method, "POST", "subscription.cancel at_period_end uses POST")
+  assert_eq(http_mock_calls()[0].body, "cancel_at_period_end=true", "subscription.cancel body")
+  // subscription.cancel default -> DELETE /v1/subscriptions/{id}.
+  http_mock_clear()
+  http_mock(
+    "DELETE",
+    base + "/v1/subscriptions/sub_1",
+    {status: 200, body: "{\"id\":\"sub_1\",\"status\":\"canceled\"}"},
+  )
+  const canceled = call("subscription.cancel", common + {id: "sub_1"})
+  assert_eq(canceled.status, "canceled", "subscription.cancel deletes")
+  assert_eq(http_mock_calls()[0].method, "DELETE", "subscription.cancel default uses DELETE")
+  // meter_event.create -> POST /v2/billing/meter_events, JSON body, value as string.
+  http_mock_clear()
+  http_mock(
+    "POST",
+    base + "/v2/billing/meter_events",
+    {status: 200, body: "{\"object\":\"v2.billing.meter_event\"}"},
+  )
+  call(
+    "meter_event.create",
+    common
+      + {event_name: "api_request", identifier: "idem_1", stripe_customer_id: "cus_1", value: 5},
+  )
+  const meter_call = http_mock_calls({redact_sensitive: false})[0]
+  const meter_body = json_parse(meter_call.body)
+  assert_eq(meter_body.event_name, "api_request", "meter_event event_name")
+  assert_eq(meter_body.payload.stripe_customer_id, "cus_1", "meter_event customer")
+  assert_eq(meter_body.payload.value, "5", "meter_event value is a string")
+  assert_eq(meter_body.identifier, "idem_1", "meter_event identifier")
+  assert_eq(meter_call.headers["content-type"], "application/json", "meter_event JSON content type")
+  // meter.list / meter.create.
+  http_mock_clear()
+  http_mock(
+    "GET",
+    base + "/v1/billing/meters",
+    {status: 200, body: "{\"data\":[{\"id\":\"mtr_1\"}]}"},
+  )
+  assert_eq(call("meter.list", common).data[0].id, "mtr_1", "meter.list")
+  http_mock("POST", base + "/v1/billing/meters", {status: 200, body: "{\"id\":\"mtr_2\"}"})
+  call("meter.create", common + {display_name: "API Requests", event_name: "api_request"})
+  assert_eq(
+    http_mock_calls()[1].body,
+    "default_aggregation[formula]=sum&display_name=API%20Requests&event_name=api_request",
+    "meter.create defaults aggregation to sum",
+  )
+  // product.list / product.create.
+  http_mock_clear()
+  http_mock("GET", base + "/v1/products", {status: 200, body: "{\"data\":[{\"id\":\"prod_1\"}]}"})
+  assert_eq(call("product.list", common).data[0].id, "prod_1", "product.list")
+  http_mock("POST", base + "/v1/products", {status: 200, body: "{\"id\":\"prod_2\"}"})
+  assert_eq(call("product.create", common + {name: "Pro"}).id, "prod_2", "product.create")
+  // price.list with lookup_keys -> GET /v1/prices?lookup_keys[0]=...
+  http_mock_clear()
+  http_mock("GET", base + "/v1/prices*", {status: 200, body: "{\"data\":[{\"id\":\"price_1\"}]}"})
+  assert_eq(
+    call("price.list", common + {lookup_keys: ["gold_monthly", "gold_yearly"]}).data[0].id,
+    "price_1",
+    "price.list with lookup_keys",
+  )
+  assert_eq(
+    http_mock_calls({redact_sensitive: false})[0].url,
+    base + "/v1/prices?lookup_keys[0]=gold_monthly&lookup_keys[1]=gold_yearly",
+    "price.list encodes lookup_keys as query",
+  )
+  // price.create with nested recurring.
+  http_mock_clear()
+  http_mock("POST", base + "/v1/prices", {status: 200, body: "{\"id\":\"price_2\"}"})
+  call(
+    "price.create",
+    common
+      + {
+      currency: "usd",
+      lookup_key: "metered_api",
+      product: "prod_1",
+      recurring: {interval: "month", meter: "mtr_1", usage_type: "metered"},
+    },
+  )
+  assert_eq(
+    http_mock_calls()[0].body,
+    "currency=usd&lookup_key=metered_api&product=prod_1&recurring[interval]=month"
+      + "&recurring[meter]=mtr_1&recurring[usage_type]=metered",
+    "price.create nested recurring form body",
+  )
+  // webhook_endpoint.create / list.
+  http_mock_clear()
+  http_mock(
+    "POST",
+    base + "/v1/webhook_endpoints",
+    {status: 200, body: "{\"id\":\"we_1\",\"secret\":\"whsec_x\"}"},
+  )
+  call(
+    "webhook_endpoint.create",
+    common
+      + {
+      enabled_events: ["invoice.paid", "checkout.session.completed"],
+      url: "https://x.test/hook",
+    },
+  )
+  assert_eq(
+    http_mock_calls()[0].body,
+    "enabled_events[0]=invoice.paid&enabled_events[1]=checkout.session.completed"
+      + "&url=https%3A%2F%2Fx.test%2Fhook",
+    "webhook_endpoint.create enabled_events list",
+  )
+  http_mock(
+    "GET",
+    base + "/v1/webhook_endpoints",
+    {status: 200, body: "{\"data\":[{\"id\":\"we_1\"}]}"},
+  )
+  assert_eq(call("webhook_endpoint.list", common).data[0].id, "we_1", "webhook_endpoint.list")
+  // test_clock.create / advance (test-mode e2e helpers).
+  http_mock_clear()
+  http_mock(
+    "POST",
+    base + "/v1/test_helpers/test_clocks",
+    {status: 200, body: "{\"id\":\"clock_1\"}"},
+  )
+  assert_eq(
+    call("test_clock.create", common + {frozen_time: 1776859200, name: "trial"}).id,
+    "clock_1",
+    "test_clock.create",
+  )
+  http_mock(
+    "POST",
+    base + "/v1/test_helpers/test_clocks/clock_1/advance",
+    {status: 200, body: "{\"id\":\"clock_1\",\"status\":\"advancing\"}"},
+  )
+  assert_eq(
+    call("test_clock.advance", common + {frozen_time: 1779451200, id: "clock_1"}).status,
+    "advancing",
+    "test_clock.advance",
+  )
+  // Idempotency-Key header threads through on a v1 POST.
+  http_mock_clear()
+  http_mock("POST", base + "/v1/customers", {status: 200, body: "{\"id\":\"cus_9\"}"})
+  call("customer.create", common + {email: "z@example.test", idempotency_key: "idem_key_1"})
+  assert_eq(
+    http_mock_calls({redact_sensitive: false})[0].headers["idempotency-key"],
+    "idem_key_1",
+    "idempotency key header threads through",
+  )
+  // api.request raw passthrough (GET, no body).
+  http_mock_clear()
+  http_mock("GET", base + "/v1/balance", {status: 200, body: "{\"object\":\"balance\"}"})
+  assert_eq(
+    call("api.request", common + {method: "GET", path: "/v1/balance"}).object,
+    "balance",
+    "api.request raw GET passthrough",
+  )
+  // Missing api_key rejects with missing_key.
+  http_mock_clear()
+  const no_key = call("customer.get", {api_base_url: base, id: "cus_1"})
+  assert(is_err(no_key), "missing api key rejects")
+  assert_eq(unwrap_err(no_key).code, "missing_key", "missing key code")
+  // Missing required argument rejects.
+  const no_id = call("customer.get", common)
+  assert(is_err(no_id), "missing id rejects")
+  assert_eq(unwrap_err(no_id).code, "missing_argument", "missing argument code")
+  // Unsupported method rejects.
+  const unsupported = call("customer.destroy", common)
+  assert(is_err(unsupported), "unsupported method rejected")
+  assert_eq(unwrap_err(unsupported).code, "method_not_found", "unsupported method code")
+  // Private / loopback api_base_url is blocked (SSRF guard).
+  const ssrf = call(
+    "customer.get",
+    {api_base_url: "https://169.254.169.254", api_key: key, id: "cus_1"},
+  )
+  assert(is_err(ssrf), "link-local host blocked")
+  assert_eq(unwrap_err(ssrf).code, "invalid_url", "ssrf guard code")
+  // 429 then 200: retry-once succeeds.
+  http_mock_clear()
+  http_mock(
+    "GET",
+    base + "/v1/customers/cus_r",
+    {
+      responses: [
+        {
+          status: 429,
+          body: "{\"error\":{\"message\":\"rate limited\"}}",
+          headers: {"retry-after": "0"},
+        },
+        {status: 200, body: "{\"id\":\"cus_r\"}"},
+      ],
+    },
+  )
+  const retried = call("customer.get", common + {id: "cus_r"})
+  assert_eq(retried.id, "cus_r", "429 retried once then succeeds")
+  // Persistent 429: second 429 surfaces rate_limited.
+  http_mock_clear()
+  http_mock(
+    "GET",
+    base + "/v1/customers/cus_z",
+    {
+      responses: [
+        {status: 429, body: "{}", headers: {"retry-after": "0"}},
+        {status: 429, body: "{}", headers: {"retry-after": "0"}},
+      ],
+    },
+  )
+  const capped = call("customer.get", common + {id: "cus_z"})
+  assert(is_err(capped), "persistent 429 rejects")
+  assert_eq(unwrap_err(capped).code, "rate_limited", "persistent 429 code")
+  // 401 surfaces unauthorized.
+  http_mock_clear()
+  http_mock(
+    "GET",
+    base + "/v1/customers/cus_401",
+    {status: 401, body: "{\"error\":{\"message\":\"bad key\"}}"},
+  )
+  const unauthorized = call("customer.get", common + {id: "cus_401"})
+  assert(is_err(unauthorized), "401 rejects")
+  assert_eq(unwrap_err(unauthorized).code, "unauthorized", "401 code")
+  http_mock_clear()
+}

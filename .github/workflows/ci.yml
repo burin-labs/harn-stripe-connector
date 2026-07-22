@@ -1,0 +1,132 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  merge_group:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  harn:
+    name: Harn
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Check connector guidance is canonical
+        shell: bash
+        run: |
+          set -euo pipefail
+          guidance_files=()
+          for file in CLAUDE.md AGENTS.md; do
+            if [[ -f "${file}" ]]; then
+              guidance_files+=("${file}")
+            fi
+          done
+          if [[ "${#guidance_files[@]}" -eq 0 ]]; then
+            echo "Add CLAUDE.md or AGENTS.md with a pointer to the canonical connector authoring guide." >&2
+            exit 1
+          fi
+          copied_guidance='(^## (Quick repo conventions|How to test|Reference Rust impl|Upstream conventions|Harn module connectors|Connector package gate|Rust connectors|Testing|Development)$|File extension:|Entry point:|Tests live under|Run targeted checks|Run checks|cargo install harn-cli|harn --version|harn install|harn (check|lint|fmt|connector (check|test))|for test in tests/\*\.harn)'
+          for file in "${guidance_files[@]}"; do
+            if ! grep -Eq 'docs/src/connectors/authoring\.md|docs\.harnlang\.com/connectors/authoring\.html' "${file}"; then
+              echo "${file} must link to docs/src/connectors/authoring.md instead of restating it." >&2
+              exit 1
+            fi
+            if grep -Eiq "${copied_guidance}" "${file}"; then
+              echo "${file} is re-implementing canonical Harn authoring guidance; keep only provider-specific notes." >&2
+              exit 1
+            fi
+          done
+          if [[ -f CLAUDE.md ]] && ! grep -Eq '^## Provider Notes$' CLAUDE.md; then
+            echo "CLAUDE.md must keep local content under a Provider Notes section." >&2
+            exit 1
+          fi
+
+      - name: Read Harn version
+        id: harn-version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(tr -d '[:space:]' < .harn-version)"
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+
+      - name: Install harn-cli
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${{ steps.harn-version.outputs.version }}"
+          harn_root="${HOME}/.harn-cli/${version}"
+          if [[ ! -x "${harn_root}/bin/harn" ]]; then
+            mkdir -p "${harn_root}/bin"
+            curl -fsSL \
+              -o "${RUNNER_TEMP}/harn.tar.gz" \
+              "https://github.com/burin-labs/harn/releases/download/v${version}/harn-x86_64-unknown-linux-gnu.tar.gz"
+            tar -xzf "${RUNNER_TEMP}/harn.tar.gz" -C "${harn_root}/bin"
+          fi
+          echo "${harn_root}/bin" >> "${GITHUB_PATH}"
+
+      - name: Show Harn version
+        run: harn --version
+
+      - name: Install Harn dependencies
+        run: harn install
+
+      - name: Check
+        run: harn check src
+
+      - name: Lint
+        run: harn lint src
+
+      - name: Format
+        run: harn fmt --check src tests
+
+      - name: Run smoke tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          for test in tests/*.harn; do
+            harn run "${test}"
+          done
+
+      - name: Connector contract
+        run: harn connector check .
+
+      - name: Package install smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          smoke_root="$(mktemp -d)"
+          trap 'rm -rf "$smoke_root"' EXIT
+          cat > "$smoke_root/harn.toml" <<'EOF'
+          [package]
+          name = "harn-stripe-connector-consumer-smoke"
+          version = "0.0.0"
+          EOF
+          cd "$smoke_root"
+          harn add "$GITHUB_WORKSPACE@HEAD"
+          printf 'import "harn-stripe-connector/default"\n' > smoke.harn
+          harn check smoke.harn
+
+  ci-status:
+    name: CI status
+    if: always()
+    needs: [harn]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check for failures
+        run: |
+          if [[ "${{ contains(needs.*.result, 'failure') }}" == "true" ]]; then
+            echo "One or more CI jobs failed"
+            exit 1
+          fi
+          echo "All CI jobs passed or were skipped"

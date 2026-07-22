@@ -1,0 +1,1026 @@
+const STRIPE_PROVIDER_ID = "stripe"
+
+const STRIPE_STATE_KEY = "harn-stripe-connector.state"
+
+const STRIPE_API_BASE_URL = "https://api.stripe.com"
+
+const STRIPE_WEBHOOK_SECRET_ID = "stripe/webhook-secret"
+
+const MAX_BODY_BYTES = 1048576
+
+// Reject signed deliveries whose embedded timestamp is older than this many
+// seconds. The timestamp is part of the signed message, so without this window
+// a captured-and-replayed delivery would still verify forever.
+const SIGNATURE_MAX_AGE_SECONDS = 300
+
+const STRIPE_SUBSCRIPTION_PREFIX = "customer.subscription."
+
+const STRIPE_READ_METHODS = [
+  "customer.get",
+  "subscription.get",
+  "meter.list",
+  "product.list",
+  "price.list",
+  "webhook_endpoint.list",
+  "api.request",
+]
+
+const STRIPE_MUTATING_METHODS = [
+  "customer.create",
+  "checkout_session.create",
+  "billing_portal_session.create",
+  "subscription.update",
+  "subscription.cancel",
+  "meter_event.create",
+  "meter.create",
+  "product.create",
+  "price.create",
+  "webhook_endpoint.create",
+  "test_clock.create",
+  "test_clock.advance",
+]
+
+const STRIPE_OUTBOUND_METHODS = STRIPE_READ_METHODS + STRIPE_MUTATING_METHODS
+
+/** Return this connector's Harn provider id. */
+pub fn provider_id() {
+  return STRIPE_PROVIDER_ID
+}
+
+/** Return the trigger kinds supported by this connector. */
+pub fn kinds() {
+  return ["webhook"]
+}
+
+/**
+ * Describe the outbound methods and which require human approval.
+ *
+ * Mutating methods (creates / updates / cancels) are flagged
+ * `requires_approval: true` so the orchestrator gates them behind the standard
+ * approval boundary; read-only methods and the raw `api.request` escape hatch
+ * pass through.
+ */
+pub fn methods() {
+  let out = []
+  for method in STRIPE_OUTBOUND_METHODS {
+    out = out + [{name: method, requires_approval: contains(STRIPE_MUTATING_METHODS, method)}]
+  }
+  return out
+}
+
+/** Return the canonical normalized Stripe event payload schema. */
+pub fn payload_schema() {
+  return {
+    harn_schema_name: "StripeEventPayload",
+    json_schema: {
+      type: "object",
+      required: ["provider", "event_type", "raw"],
+      additionalProperties: true,
+      properties: {
+        provider: {type: "string"},
+        event_id: {type: ["string", "null"]},
+        event_type: {type: "string"},
+        livemode: {type: ["boolean", "null"]},
+        customer: {type: ["string", "null"]},
+        subscription: {type: ["string", "null"]},
+        status: {type: ["string", "null"]},
+        client_reference_id: {type: ["string", "null"]},
+        metadata: {type: ["object", "null"]},
+        raw: {type: "object"},
+      },
+    },
+  }
+}
+
+/** Initialize connector state with orchestrator context. */
+pub fn init(ctx = nil) {
+  const next = __state() + {initialized: true, ctx: ctx ?? {}}
+  __set_state(next)
+  return next
+}
+
+/** Activate webhook bindings and reject duplicate configured paths. */
+pub fn activate(bindings = []) {
+  let by_id = {}
+  let seen_paths = {}
+  for binding in bindings ?? [] {
+    const binding_id = binding?.binding_id ?? binding?.id
+      ?? ("binding-" + to_string(len(by_id.keys())))
+    const path = binding?.path ?? binding?.match?.path
+    if path != nil && path != "" {
+      if seen_paths.get(path) {
+        return __err(
+          "activation",
+          "stripe connector path `" + path + "` is configured by multiple bindings",
+        )
+      }
+      seen_paths[path] = true
+    }
+    by_id[binding_id] = binding + {binding_id: binding_id}
+  }
+  const next = __state() + {active: true, bindings: by_id}
+  __set_state(next)
+  return {bindings: len(by_id.keys()), kind: "webhook", provider: STRIPE_PROVIDER_ID}
+}
+
+/** Clear connector lifecycle state. */
+pub fn shutdown() {
+  store_delete(STRIPE_STATE_KEY)
+  return {active: false, provider: STRIPE_PROVIDER_ID}
+}
+
+@complexity(allow)
+/**
+ * Verify and normalize a raw Stripe webhook request.
+ *
+ * Stripe signs webhooks with `Stripe-Signature: t=<unix>,v1=<hex>[,v1=<hex>...]`.
+ * The signed message is the literal `"<t>.<raw_body>"`, HMAC-SHA256 keyed by the
+ * endpoint's signing secret (`whsec_...`). We recompute, accept when ANY `v1`
+ * entry matches in constant time, AND enforce a 5-minute freshness window on the
+ * timestamp (replay protection).
+ *
+ * Fails closed when no webhook signing secret is configured.
+ */
+pub fn normalize_inbound(raw) {
+  const body_text = raw?.body_text ?? raw?.body ?? ""
+  if len(body_text) > MAX_BODY_BYTES {
+    return __reject(413, "payload_too_large", "stripe webhook body exceeds 1 MiB cap")
+  }
+  const headers = raw?.headers ?? {}
+  const verified = __verify_webhook(raw, headers, body_text)
+  if is_err(verified) {
+    return __reject_err(unwrap_err(verified))
+  }
+  const parsed = try {
+    json_parse(body_text)
+  }
+  if is_err(parsed) {
+    return __reject(400, "invalid_json", "stripe payload body is not valid JSON")
+  }
+  const payload = unwrap(parsed)
+  const event_type = payload?.type
+  if event_type == nil || event_type == "" {
+    return __reject(400, "missing_event", "stripe event payload is missing the `type` field")
+  }
+  const normalized = __build_event(to_string(event_type), payload, raw, headers)
+  return {type: "event", event: normalized}
+}
+
+@complexity(allow)
+/** Dispatch a supported Stripe REST method. */
+pub fn call(method, args = {}) {
+  if !contains(STRIPE_OUTBOUND_METHODS, method) {
+    return __err(
+      "method_not_found",
+      "stripe connector does not implement outbound method `" + method + "`",
+    )
+  }
+  const config = __outbound_config(args ?? {})
+  if is_err(config) {
+    return config
+  }
+  return __dispatch(method, args ?? {}, unwrap(config))
+}
+
+fn __state() {
+  return store_get(STRIPE_STATE_KEY)
+    ?? {active: false, bindings: {}, ctx: {}, initialized: false}
+}
+
+fn __set_state(state) {
+  store_set(STRIPE_STATE_KEY, state)
+  return state
+}
+
+fn __err(code, message) {
+  return Err({code: code, message: message})
+}
+
+fn __reject(status, code, message) {
+  return {
+    type: "reject",
+    reject: {
+      body: json_stringify({error: code, message: message}),
+      content_type: "application/json",
+      status: status,
+    },
+  }
+}
+
+fn __reject_err(err) {
+  const code = err?.code ?? "rejected"
+  const message = err?.message ?? "request rejected"
+  const status = if code == "invalid_signature" || code == "missing_signature"
+    || code
+    == "missing_secret"
+    || code == "stale_signature" {
+    401
+  } else {
+    400
+  }
+  return __reject(status, code, message)
+}
+
+fn __header(headers, name) {
+  const wanted = lowercase(name)
+  for entry in (headers ?? {}).entries() {
+    if lowercase(trim(to_string(entry.key))) == wanted {
+      return trim(to_string(entry.value))
+    }
+  }
+  return nil
+}
+
+/** Return the first candidate that is non-nil and non-blank as a string. */
+fn __first_nonempty(candidates) {
+  for candidate in candidates {
+    if candidate != nil && trim(to_string(candidate)) != "" {
+      return to_string(candidate)
+    }
+  }
+  return nil
+}
+
+/** Read a secret id, returning nil when it resolves to an empty/absent value. */
+fn __resolve_secret(secret_id) {
+  const resolved = try {
+    secret_get(secret_id)
+  }
+  if is_err(resolved) {
+    return nil
+  }
+  const value = to_string(unwrap(resolved))
+  if value == "" {
+    return nil
+  }
+  return value
+}
+
+fn __binding(raw) {
+  const binding_id = raw?.metadata?.binding_id ?? raw?.binding_id
+  if binding_id == nil {
+    return nil
+  }
+  return (__state().bindings ?? {}).get(binding_id)
+}
+
+fn __webhook_secret(raw) {
+  const state = __state()
+  const binding = __binding(raw)
+  const inline = __first_nonempty(
+    [
+      state.ctx?.webhook_secret,
+      state.ctx?.secrets?.webhook_secret,
+      binding?.webhook_secret,
+      binding?.secrets?.webhook_secret,
+      binding?.config?.webhook_secret,
+    ],
+  )
+  if inline != nil {
+    return inline
+  }
+  return __resolve_secret(__webhook_secret_id(raw) ?? STRIPE_WEBHOOK_SECRET_ID)
+}
+
+fn __webhook_secret_id(raw) {
+  const metadata = raw?.metadata ?? {}
+  const binding = __binding(raw)
+  return __first_nonempty(
+    [
+      metadata?.secret_ids?.webhook_secret,
+      metadata?.config?.secret_ids?.webhook_secret,
+      binding?.webhook_secret_id,
+      binding?.secrets?.webhook_secret_id,
+      binding?.config?.secret_ids?.webhook_secret,
+    ],
+  )
+}
+
+fn __verify_webhook(raw, headers, body_text) {
+  const secret = __webhook_secret(raw)
+  if secret == nil || trim(to_string(secret)) == "" {
+    return __err(
+      "missing_secret",
+      "stripe webhook signing secret is required; configure stripe/webhook-secret to verify inbound webhooks",
+    )
+  }
+  const signature_header = __header(headers, "stripe-signature")
+  if signature_header == nil || signature_header == "" {
+    return __err("missing_signature", "missing Stripe-Signature header")
+  }
+  return __verify_signature(raw, signature_header, body_text, to_string(secret))
+}
+
+@complexity(allow)
+fn __verify_signature(raw, signature_header, body_text, secret) {
+  const fields = __parse_signature_header(signature_header)
+  const timestamp = fields.t
+  const signatures = fields.v1
+  if timestamp == nil || trim(to_string(timestamp)) == "" {
+    return __err("invalid_signature", "Stripe-Signature must contain a `t=<unix>` timestamp")
+  }
+  if len(signatures) == 0 {
+    return __err("invalid_signature", "Stripe-Signature must contain at least one `v1=<hex>` entry")
+  }
+  const signed_message = to_string(timestamp) + "." + body_text
+  const expected = lowercase(hmac_sha256(secret, signed_message))
+  let matched = false
+  for candidate in signatures {
+    if constant_time_eq(expected, lowercase(to_string(candidate))) {
+      matched = true
+    }
+  }
+  if !matched {
+    return __err("invalid_signature", "no Stripe-Signature `v1` entry matched the computed HMAC")
+  }
+  const parsed_ts = try {
+    to_int(to_string(timestamp))
+  }
+  if is_err(parsed_ts) {
+    return __err("invalid_signature", "Stripe-Signature timestamp is not an integer")
+  }
+  const now = __verification_timestamp(raw)
+  const age = now - unwrap(parsed_ts)
+  if age > SIGNATURE_MAX_AGE_SECONDS || age < -SIGNATURE_MAX_AGE_SECONDS {
+    return __err(
+      "stale_signature",
+      "Stripe-Signature timestamp is outside the " + to_string(SIGNATURE_MAX_AGE_SECONDS)
+        + "s freshness window",
+    )
+  }
+  return Ok("signed")
+}
+
+fn __verification_timestamp(raw) {
+  const received_at = raw?.received_at
+  if received_at != nil && trim(to_string(received_at)) != "" {
+    const parsed = try {
+      date_parse(to_string(received_at))
+    }
+    if !is_err(parsed) {
+      return to_int(unwrap(parsed))
+    }
+  }
+  return to_int(harness.clock.timestamp())
+}
+
+@complexity(allow)
+fn __parse_signature_header(header) {
+  let t = nil
+  let v1 = []
+  for part in split(to_string(header), ",") {
+    const trimmed = trim(part)
+    const eq = __index_of(trimmed, "=")
+    if eq > 0 {
+      const key = lowercase(trim(trimmed[0:eq]))
+      const value = trim(trimmed[eq + 1:len(trimmed)])
+      if key == "t" {
+        t = value
+      } else if key == "v1" {
+        v1 = v1.push(value)
+      }
+    }
+  }
+  return {t: t, v1: v1}
+}
+
+@complexity(allow)
+fn __build_event(event_type, payload, raw, headers) {
+  const _ = headers
+  const data_object = payload?.data?.object ?? {}
+  const event_id = payload?.id
+  const normalized_payload = {
+    client_reference_id: data_object?.client_reference_id,
+    customer: __customer_id(data_object),
+    event_id: event_id,
+    event_type: event_type,
+    livemode: payload?.livemode,
+    metadata: data_object?.metadata,
+    provider: STRIPE_PROVIDER_ID,
+    raw: payload,
+    status: data_object?.status,
+    subscription: __subscription_id(event_type, data_object),
+  }
+  return {
+    dedupe_key: __dedupe_key(event_id),
+    kind: __event_kind(event_type),
+    occurred_at: raw?.received_at,
+    payload: normalized_payload,
+    signature_status: {method: "signature", state: "verified"},
+  }
+}
+
+fn __event_kind(event_type) {
+  if event_type == "checkout.session.completed" {
+    return "checkout.completed"
+  }
+  if event_type == "invoice.paid" {
+    return "invoice.paid"
+  }
+  if event_type == "invoice.payment_failed" {
+    return "invoice.payment_failed"
+  }
+  if starts_with(event_type, STRIPE_SUBSCRIPTION_PREFIX) {
+    return "subscription." + event_type[len(STRIPE_SUBSCRIPTION_PREFIX):len(event_type)]
+  }
+  // Unknown-but-verified events pass through under a generic kind rather than
+  // being rejected, so downstream consumers can still see them.
+  return "event"
+}
+
+fn __customer_id(data_object) {
+  const customer = data_object?.customer
+  if type_of(customer) == "dict" {
+    return customer?.id
+  }
+  return customer
+}
+
+fn __subscription_id(event_type, data_object) {
+  if starts_with(event_type, STRIPE_SUBSCRIPTION_PREFIX) {
+    return data_object?.id
+  }
+  const sub = data_object?.subscription
+  if type_of(sub) == "dict" {
+    return sub?.id
+  }
+  return sub
+}
+
+fn __dedupe_key(event_id) {
+  return "stripe:" + to_string(event_id ?? "unknown")
+}
+
+fn __require(args, key) {
+  const value = args.get(key)
+  if value == nil || trim(to_string(value)) == "" {
+    return __err("missing_argument", "stripe call requires `" + key + "`")
+  }
+  return Ok(to_string(value))
+}
+
+fn __idempotency_headers(args) {
+  const key = args?.idempotency_key
+  if key != nil && trim(to_string(key)) != "" {
+    return {"Idempotency-Key": to_string(key)}
+  }
+  return {}
+}
+
+@complexity(allow)
+fn __dispatch(method, args, cfg) {
+  if method == "api.request" {
+    return __api_request(args, cfg)
+  }
+  if method == "customer.create" {
+    return __post_form(
+      cfg,
+      "/v1/customers",
+      {email: args?.email, metadata: args?.metadata, name: args?.name},
+      __idempotency_headers(args),
+    )
+  }
+  if method == "customer.get" {
+    const id = __require(args, "id")
+    if is_err(id) {
+      return id
+    }
+    return __get(cfg, "/v1/customers/" + url_encode(unwrap(id)))
+  }
+  if method == "checkout_session.create" {
+    return __checkout_session_create(args, cfg)
+  }
+  if method == "billing_portal_session.create" {
+    const customer = __require(args, "customer")
+    if is_err(customer) {
+      return customer
+    }
+    return __post_form(
+      cfg,
+      "/v1/billing_portal/sessions",
+      {customer: unwrap(customer), return_url: args?.return_url},
+      __idempotency_headers(args),
+    )
+  }
+  if method == "subscription.get" {
+    const id = __require(args, "id")
+    if is_err(id) {
+      return id
+    }
+    return __get(cfg, "/v1/subscriptions/" + url_encode(unwrap(id)))
+  }
+  if method == "subscription.update" {
+    const id = __require(args, "id")
+    if is_err(id) {
+      return id
+    }
+    return __post_form(
+      cfg,
+      "/v1/subscriptions/" + url_encode(unwrap(id)),
+      args?.body ?? {},
+      __idempotency_headers(args),
+    )
+  }
+  if method == "subscription.cancel" {
+    return __subscription_cancel(args, cfg)
+  }
+  if method == "meter_event.create" {
+    return __meter_event_create(args, cfg)
+  }
+  if method == "meter.list" {
+    return __get(cfg, "/v1/billing/meters")
+  }
+  if method == "meter.create" {
+    const display_name = __require(args, "display_name")
+    if is_err(display_name) {
+      return display_name
+    }
+    const event_name = __require(args, "event_name")
+    if is_err(event_name) {
+      return event_name
+    }
+    return __post_form(
+      cfg,
+      "/v1/billing/meters",
+      {
+        default_aggregation: {formula: args?.aggregation ?? "sum"},
+        display_name: unwrap(display_name),
+        event_name: unwrap(event_name),
+      },
+      __idempotency_headers(args),
+    )
+  }
+  if method == "product.list" {
+    return __get(cfg, "/v1/products")
+  }
+  if method == "product.create" {
+    const name = __require(args, "name")
+    if is_err(name) {
+      return name
+    }
+    return __post_form(
+      cfg,
+      "/v1/products",
+      {metadata: args?.metadata, name: unwrap(name)},
+      __idempotency_headers(args),
+    )
+  }
+  if method == "price.list" {
+    return __get(cfg, __with_query("/v1/prices", {lookup_keys: args?.lookup_keys}))
+  }
+  if method == "price.create" {
+    return __price_create(args, cfg)
+  }
+  if method == "webhook_endpoint.list" {
+    return __get(cfg, "/v1/webhook_endpoints")
+  }
+  if method == "webhook_endpoint.create" {
+    const url_value = __require(args, "url")
+    if is_err(url_value) {
+      return url_value
+    }
+    return __post_form(
+      cfg,
+      "/v1/webhook_endpoints",
+      {enabled_events: args?.enabled_events, url: unwrap(url_value)},
+      __idempotency_headers(args),
+    )
+  }
+  if method == "test_clock.create" {
+    const frozen_time = __require(args, "frozen_time")
+    if is_err(frozen_time) {
+      return frozen_time
+    }
+    return __post_form(
+      cfg,
+      "/v1/test_helpers/test_clocks",
+      {frozen_time: unwrap(frozen_time), name: args?.name},
+      __idempotency_headers(args),
+    )
+  }
+  if method == "test_clock.advance" {
+    const id = __require(args, "id")
+    if is_err(id) {
+      return id
+    }
+    const frozen_time = __require(args, "frozen_time")
+    if is_err(frozen_time) {
+      return frozen_time
+    }
+    return __post_form(
+      cfg,
+      "/v1/test_helpers/test_clocks/" + url_encode(unwrap(id)) + "/advance",
+      {frozen_time: unwrap(frozen_time)},
+      __idempotency_headers(args),
+    )
+  }
+  return __err(
+    "method_not_found",
+    "stripe connector does not implement outbound method `" + method + "`",
+  )
+}
+
+@complexity(allow)
+fn __checkout_session_create(args, cfg) {
+  const success_url = __require(args, "success_url")
+  if is_err(success_url) {
+    return success_url
+  }
+  const cancel_url = __require(args, "cancel_url")
+  if is_err(cancel_url) {
+    return cancel_url
+  }
+  let body = {
+    cancel_url: unwrap(cancel_url),
+    line_items: args?.line_items ?? [],
+    mode: args?.mode ?? "subscription",
+    success_url: unwrap(success_url),
+  }
+  if args?.customer != nil {
+    body = body + {customer: args.customer}
+  }
+  if args?.client_reference_id != nil {
+    body = body + {client_reference_id: args.client_reference_id}
+  }
+  if args?.metadata != nil {
+    body = body + {metadata: args.metadata}
+  }
+  if args?.subscription_metadata != nil {
+    body = body + {subscription_data: {metadata: args.subscription_metadata}}
+  }
+  if args?.allow_promotion_codes != nil {
+    body = body + {allow_promotion_codes: args.allow_promotion_codes}
+  }
+  return __post_form(cfg, "/v1/checkout/sessions", body, __idempotency_headers(args))
+}
+
+fn __subscription_cancel(args, cfg) {
+  const id = __require(args, "id")
+  if is_err(id) {
+    return id
+  }
+  const path = "/v1/subscriptions/" + url_encode(unwrap(id))
+  if args?.at_period_end == true {
+    // Schedule cancellation at the end of the current period instead of
+    // deleting the subscription immediately.
+    return __post_form(cfg, path, {cancel_at_period_end: true}, __idempotency_headers(args))
+  }
+  return __stripe_request("DELETE", __api_url(cfg.api_base_url, path), "none", nil, cfg, {})
+}
+
+@complexity(allow)
+fn __price_create(args, cfg) {
+  const product = __require(args, "product")
+  if is_err(product) {
+    return product
+  }
+  const currency = __require(args, "currency")
+  if is_err(currency) {
+    return currency
+  }
+  let body = {currency: unwrap(currency), product: unwrap(product)}
+  if args?.unit_amount != nil {
+    body = body + {unit_amount: args.unit_amount}
+  }
+  if args?.recurring != nil {
+    body = body + {recurring: args.recurring}
+  }
+  if args?.lookup_key != nil {
+    body = body + {lookup_key: args.lookup_key}
+  }
+  if args?.transfer_lookup_key != nil {
+    body = body + {transfer_lookup_key: args.transfer_lookup_key}
+  }
+  return __post_form(cfg, "/v1/prices", body, __idempotency_headers(args))
+}
+
+@complexity(allow)
+fn __meter_event_create(args, cfg) {
+  const event_name = __require(args, "event_name")
+  if is_err(event_name) {
+    return event_name
+  }
+  const stripe_customer_id = __require(args, "stripe_customer_id")
+  if is_err(stripe_customer_id) {
+    return stripe_customer_id
+  }
+  if args?.value == nil {
+    return __err("missing_argument", "stripe call requires `value`")
+  }
+  // v2 meter events take a JSON body and require `value` as a string.
+  let body = {
+    event_name: unwrap(event_name),
+    payload: {stripe_customer_id: unwrap(stripe_customer_id), value: to_string(args.value)},
+  }
+  if args?.identifier != nil {
+    body = body + {identifier: args.identifier}
+  }
+  if args?.timestamp != nil {
+    body = body + {timestamp: args.timestamp}
+  }
+  return __post_json(cfg, "/v2/billing/meter_events", body, __idempotency_headers(args))
+}
+
+@complexity(allow)
+fn __api_request(args, cfg) {
+  const http_method = __upcase_method(args?.method ?? "GET")
+  const path = to_string(args?.path ?? "")
+  const url = __api_url(cfg.api_base_url, path)
+  let headers = {}
+  if args?.api_version != nil && trim(to_string(args.api_version)) != "" {
+    headers = {"Stripe-Version": to_string(args.api_version)}
+  }
+  headers = headers + __idempotency_headers(args)
+  if args?.body == nil {
+    return __stripe_request(http_method, url, "none", nil, cfg, headers)
+  }
+  // v2 endpoints take JSON; v1 endpoints take rails-style form encoding.
+  if starts_with(path, "/v2") {
+    return __stripe_request(http_method, url, "json", args.body, cfg, headers)
+  }
+  return __stripe_request(http_method, url, "form", args.body, cfg, headers)
+}
+
+fn __get(cfg, path) {
+  return __stripe_request("GET", __api_url(cfg.api_base_url, path), "none", nil, cfg, {})
+}
+
+fn __post_form(cfg, path, body, headers) {
+  return __stripe_request("POST", __api_url(cfg.api_base_url, path), "form", body, cfg, headers)
+}
+
+fn __post_json(cfg, path, body, headers) {
+  return __stripe_request("POST", __api_url(cfg.api_base_url, path), "json", body, cfg, headers)
+}
+
+fn __with_query(path, params) {
+  const encoded = __form_encode(params ?? {})
+  if encoded == "" {
+    return path
+  }
+  return path + "?" + encoded
+}
+
+fn __form_encode(data) {
+  return join(__form_pairs("", data), "&")
+}
+
+@complexity(allow)
+fn __form_pairs(prefix, value) {
+  // nil fields are omitted entirely so callers can pass optional args straight
+  // through without pre-filtering.
+  if value == nil {
+    return []
+  }
+  const kind = type_of(value)
+  if kind == "dict" {
+    let out = []
+    // `entries()` yields keys in a stable (alphabetical) order, so the encoded
+    // body is deterministic for tests.
+    for entry in value.entries() {
+      const key = to_string(entry.key)
+      const child = if prefix == "" {
+        key
+      } else {
+        prefix + "[" + key + "]"
+      }
+      out = out + __form_pairs(child, entry.value)
+    }
+    return out
+  }
+  if kind == "list" {
+    let out = []
+    let i = 0
+    for item in value {
+      out = out + __form_pairs(prefix + "[" + to_string(i) + "]", item)
+      i = i + 1
+    }
+    return out
+  }
+  return [prefix + "=" + __form_scalar(value)]
+}
+
+fn __form_scalar(value) {
+  if type_of(value) == "bool" {
+    return if value {
+      "true"
+    } else {
+      "false"
+    }
+  }
+  return url_encode(to_string(value))
+}
+
+fn __upcase_method(method) {
+  return uppercase(trim(to_string(method)))
+}
+
+@complexity(allow)
+fn __outbound_config(args) {
+  const env_base = harness.env.get_or("STRIPE_API_BASE_URL", STRIPE_API_BASE_URL)
+  const api_base_url = args?.api_base_url ?? env_base
+  const base_check = __validate_url_host(api_base_url, "api_base_url")
+  if is_err(base_check) {
+    return base_check
+  }
+  const env_key = harness.env.get("STRIPE_API_KEY") ?? harness.env.get("STRIPE_SECRET_KEY")
+  const api_key = args?.api_key ?? args?.secret ?? args?.secrets?.api_key ?? env_key
+  if api_key == nil || trim(to_string(api_key)) == "" {
+    return __err("missing_key", "stripe connector requires api_key (Bearer) for outbound calls")
+  }
+  return Ok({api_base_url: to_string(api_base_url), api_key: to_string(api_key)})
+}
+
+fn __api_url(api_base_url, path) {
+  const base = trim(to_string(api_base_url))
+  const prefix = if ends_with(base, "/") {
+    base[0:len(base) - 1]
+  } else {
+    base
+  }
+  if starts_with(path, "/") {
+    return prefix + path
+  }
+  if path == "" {
+    return prefix
+  }
+  return prefix + "/" + path
+}
+
+@complexity(allow)
+fn __validate_url_host(url_value, label) {
+  if url_value == nil || trim(to_string(url_value)) == "" {
+    return __err("invalid_url", label + " is required")
+  }
+  const url = trim(to_string(url_value))
+  if !starts_with(lowercase(url), "https://") {
+    return __err("invalid_url", label + " must use https:// scheme")
+  }
+  const after_scheme = url[8:len(url)]
+  const slash_idx = __index_of(after_scheme, "/")
+  const host_port = if slash_idx >= 0 {
+    after_scheme[0:slash_idx]
+  } else {
+    after_scheme
+  }
+  const host = __strip_port(host_port)
+  if host == "" {
+    return __err("invalid_url", label + " is missing a host")
+  }
+  const host_lc = lowercase(host)
+  if __is_disallowed_host(host_lc) {
+    return __err(
+      "invalid_url",
+      label + " host `" + host
+        + "` is not allowed (loopback/private/link-local/.internal/.local are blocked)",
+    )
+  }
+  return Ok(true)
+}
+
+fn __strip_port(host_port) {
+  if starts_with(host_port, "[") {
+    const close = __index_of(host_port, "]")
+    if close >= 0 {
+      return host_port[1:close]
+    }
+    return host_port
+  }
+  const colon = __index_of(host_port, ":")
+  if colon >= 0 {
+    return host_port[0:colon]
+  }
+  return host_port
+}
+
+fn __index_of(text, needle) {
+  const n = len(text)
+  const m = len(needle)
+  if m == 0 {
+    return 0
+  }
+  let i = 0
+  while i + m <= n {
+    if text[i:i + m] == needle {
+      return i
+    }
+    i = i + 1
+  }
+  return -1
+}
+
+@complexity(allow)
+fn __is_disallowed_host(host_lc) {
+  if host_lc == "localhost" {
+    return true
+  }
+  if ends_with(host_lc, ".localhost") || ends_with(host_lc, ".local")
+    || ends_with(
+    host_lc,
+    ".internal",
+  ) {
+    return true
+  }
+  if host_lc == "::1" || host_lc == "0:0:0:0:0:0:0:1" {
+    return true
+  }
+  if starts_with(host_lc, "127.") || starts_with(host_lc, "10.")
+    || starts_with(host_lc, "169.254.")
+    || starts_with(host_lc, "192.168.") {
+    return true
+  }
+  if starts_with(host_lc, "172.") {
+    const rest = host_lc[4:len(host_lc)]
+    const dot = __index_of(rest, ".")
+    if dot > 0 {
+      const octet_str = rest[0:dot]
+      const parsed = try {
+        to_int(octet_str)
+      }
+      if !is_err(parsed) {
+        const octet = unwrap(parsed)
+        if octet >= 16 && octet <= 31 {
+          return true
+        }
+      }
+    }
+  }
+  return false
+}
+
+@complexity(allow)
+fn __stripe_request(method, url, body_kind, body, cfg, extra_headers) {
+  let headers = {Accept: "application/json", Authorization: "Bearer " + cfg.api_key}
+  for entry in (extra_headers ?? {}).entries() {
+    headers[to_string(entry.key)] = to_string(entry.value)
+  }
+  let options = {headers: headers, retry: {backoff_ms: 0, max: 0}}
+  if body_kind == "form" {
+    options["body"] = __form_encode(body ?? {})
+    options.headers["Content-Type"] = "application/x-www-form-urlencoded"
+  } else if body_kind == "json" {
+    options["body"] = json_stringify(body ?? {})
+    options.headers["Content-Type"] = "application/json"
+  }
+  let retried_rate_limit = false
+  while true {
+    const response_result = try {
+      harness.net.request(method, url, options)
+    }
+    if is_err(response_result) {
+      return __err("transport", to_string(unwrap_err(response_result)))
+    }
+    const response = unwrap(response_result)
+    if (response.status == 429 || response.status == 503) && !retried_rate_limit {
+      retried_rate_limit = true
+      __sleep_for_retry(response)
+      continue
+    }
+    if response.status < 200 || response.status >= 300 {
+      const code = if response.status == 429 || response.status == 503 {
+        "rate_limited"
+      } else if response.status == 401 || response.status == 403 {
+        "unauthorized"
+      } else {
+        "transport"
+      }
+      return __err(
+        code,
+        "stripe API request failed with status " + to_string(response.status) + ": "
+          + response.body,
+      )
+    }
+    return __decode_response(response)
+  }
+}
+
+fn __sleep_for_retry(response) {
+  const retry_after = __header(response.headers ?? {}, "retry-after")
+  if retry_after == nil || trim(to_string(retry_after)) == "" {
+    return nil
+  }
+  const parsed = try {
+    to_int(trim(to_string(retry_after)))
+  }
+  if is_err(parsed) {
+    return nil
+  }
+  const seconds = unwrap(parsed)
+  if seconds > 0 && seconds <= 60 {
+    sleep(seconds * 1000)
+  }
+  return nil
+}
+
+fn __decode_response(response) {
+  if trim(response.body ?? "") == "" {
+    return {body: "", headers: response.headers, status: response.status}
+  }
+  const parsed = try {
+    json_parse(response.body)
+  }
+  if is_err(parsed) {
+    return __err("invalid_response", "stripe API returned invalid JSON")
+  }
+  return unwrap(parsed)
+}

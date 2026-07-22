@@ -1,0 +1,28 @@
+{
+  "id": "evt_3sub",
+  "object": "event",
+  "api_version": "2025-01-27",
+  "type": "customer.subscription.deleted",
+  "created": 1776859200,
+  "livemode": false,
+  "data": {
+    "object": {
+      "id": "sub_c1",
+      "object": "subscription",
+      "customer": "cus_c1",
+      "status": "canceled",
+      "cancel_at_period_end": false,
+      "current_period_end": 1779451200,
+      "items": {
+        "object": "list",
+        "data": [
+          {
+            "id": "si_c1",
+            "object": "subscription_item",
+            "price": {"id": "price_c1", "object": "price", "recurring": {"interval": "month"}}
+          }
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,108 @@
+[package]
+name = "harn-stripe-connector"
+version = "0.1.0"
+description = "Pure-Harn Stripe connector: signed billing webhooks + typed REST for customers, checkout, portal, subscriptions, and meter events."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/burin-labs/harn-stripe-connector"
+harn = ">=0.10,<0.11"
+
+[exports]
+default = "src/lib.harn"
+
+[[providers]]
+id = "stripe"
+connector = { harn = "src/lib.harn" }
+capabilities = ["webhook", "rate_limit", "pagination"]
+
+[providers.setup]
+auth_type = "api-key"
+flow = "api-key"
+required_secrets = ["stripe/api-key", "stripe/webhook-secret"]
+setup_command = ["harn", "connect", "stripe"]
+validation_command = ["harn", "connect", "status", "--connector", "stripe", "--json"]
+
+[[providers.setup.health_checks]]
+id = "api-key"
+kind = "secret"
+secret = "stripe/api-key"
+
+[[providers.setup.health_checks]]
+id = "webhook-secret"
+kind = "secret"
+secret = "stripe/webhook-secret"
+
+[providers.setup.recovery]
+missing_auth = "Store stripe/api-key (Dashboard -> Developers -> API keys, the Secret key sk_...) and stripe/webhook-secret (the endpoint signing secret whsec_..., shown once when you add the endpoint under Developers -> Webhooks) before enabling Stripe bindings."
+expired_credentials = "Roll the Stripe secret key in the Dashboard (Developers -> API keys -> Roll key), update stripe/api-key, and rerun Stripe validation."
+revoked_credentials = "Replace stripe/api-key with an active restricted or standard secret key that can write Customers, Checkout Sessions, Billing Portal, Subscriptions, Products, Prices, Meters, and Webhook Endpoints."
+missing_scopes = "Grant the restricted key write access to Customers, Checkout Sessions, Billing Portal, Subscriptions, Products, Prices, Billing Meters, and Webhook Endpoints; meter events also need the v2 Billing Meter Events resource."
+inaccessible_resource = "Confirm the key targets the intended account and mode (test vs live); test-mode keys cannot see live customers or subscriptions."
+transient_provider_outage = "Retry after the Stripe API and webhook delivery are healthy (status.stripe.com)."
+
+[connector_contract]
+version = 1
+
+[[connector_contract.fixtures]]
+provider = "stripe"
+name = "checkout session completed webhook"
+kind = "webhook"
+headers = { "Stripe-Signature" = "t=1776859200,v1=0000000000000000000000000000000000000000000000000000000000000000,v1=173b45b030bf1b0668517ecd43be90d519a006428f7c5655838e79e9c110a502", "content-type" = "application/json" }
+metadata = { secret_ids = { webhook_secret = "stripe/webhook-secret" } }
+body = '''{"id":"evt_1checkout","object":"event","type":"checkout.session.completed","created":1776859200,"livemode":false,"data":{"object":{"id":"cs_test_a1","object":"checkout.session","client_reference_id":"user_42","customer":"cus_a1","subscription":"sub_a1","mode":"subscription","payment_status":"paid","status":"complete","metadata":{"plan":"pro"}}}}'''
+expect_type = "event"
+expect_kind = "checkout.completed"
+expect_dedupe_key = "stripe:evt_1checkout"
+expect_signature_state = "verified"
+expect_payload_contains = { provider = "stripe", schema_name = "StripeEventPayload", raw = { provider = "stripe", event_type = "checkout.session.completed", event_id = "evt_1checkout", livemode = false, customer = "cus_a1", subscription = "sub_a1", client_reference_id = "user_42", metadata = { plan = "pro" } } }
+expect_event_count = 1
+
+[[connector_contract.fixtures]]
+provider = "stripe"
+name = "invoice payment failed webhook"
+kind = "webhook"
+headers = { "Stripe-Signature" = "t=1776859200,v1=6ade73d356011f4483724c4fcf8618f2aeffedd3d8334a9b2d0b5166d87a1893", "content-type" = "application/json" }
+metadata = { secret_ids = { webhook_secret = "stripe/webhook-secret" } }
+body = '''{"id":"evt_2invoice","object":"event","type":"invoice.payment_failed","created":1776859200,"livemode":false,"data":{"object":{"id":"in_b1","object":"invoice","customer":"cus_b1","subscription":"sub_b1","attempt_count":2,"status":"open","hosted_invoice_url":"https://invoice.stripe.com/i/in_b1"}}}'''
+expect_type = "event"
+expect_kind = "invoice.payment_failed"
+expect_dedupe_key = "stripe:evt_2invoice"
+expect_signature_state = "verified"
+expect_payload_contains = { provider = "stripe", schema_name = "StripeEventPayload", raw = { provider = "stripe", event_type = "invoice.payment_failed", event_id = "evt_2invoice", livemode = false, customer = "cus_b1", subscription = "sub_b1", status = "open" } }
+expect_event_count = 1
+
+[[connector_contract.fixtures]]
+provider = "stripe"
+name = "customer subscription deleted webhook"
+kind = "webhook"
+headers = { "Stripe-Signature" = "t=1776859200,v1=c55b5b911db1425304fcb1fbb34a397e19d27678bba03f77c5596f23b705f3a1", "content-type" = "application/json" }
+metadata = { secret_ids = { webhook_secret = "stripe/webhook-secret" } }
+body = '''{"id":"evt_3sub","object":"event","type":"customer.subscription.deleted","created":1776859200,"livemode":false,"data":{"object":{"id":"sub_c1","object":"subscription","customer":"cus_c1","status":"canceled","cancel_at_period_end":false,"current_period_end":1779451200,"items":{"object":"list","data":[{"id":"si_c1","price":{"id":"price_c1","object":"price"}}]}}}}'''
+expect_type = "event"
+expect_kind = "subscription.deleted"
+expect_dedupe_key = "stripe:evt_3sub"
+expect_signature_state = "verified"
+expect_payload_contains = { provider = "stripe", schema_name = "StripeEventPayload", raw = { provider = "stripe", event_type = "customer.subscription.deleted", event_id = "evt_3sub", livemode = false, customer = "cus_c1", subscription = "sub_c1", status = "canceled" } }
+expect_event_count = 1
+
+[[connector_contract.fixtures]]
+provider = "stripe"
+name = "stale signature reject"
+kind = "webhook"
+headers = { "Stripe-Signature" = "t=1776858600,v1=d4462cf9c484f6a84a9ed707524de6217aced8c3df3a49529b5542f8af59de53", "content-type" = "application/json" }
+metadata = { secret_ids = { webhook_secret = "stripe/webhook-secret" } }
+body = '''{"id":"evt_1checkout","object":"event","type":"checkout.session.completed","created":1776859200,"livemode":false,"data":{"object":{"id":"cs_test_a1","object":"checkout.session","client_reference_id":"user_42","customer":"cus_a1","subscription":"sub_a1","mode":"subscription","payment_status":"paid","status":"complete","metadata":{"plan":"pro"}}}}'''
+expect_type = "reject"
+expect_event_count = 0
+
+[[connector_contract.fixtures]]
+provider = "stripe"
+name = "wrong signature reject"
+kind = "webhook"
+headers = { "Stripe-Signature" = "t=1776859200,v1=deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef", "content-type" = "application/json" }
+metadata = { secret_ids = { webhook_secret = "stripe/webhook-secret" } }
+body = '''{"id":"evt_1checkout","object":"event","type":"checkout.session.completed","created":1776859200,"livemode":false,"data":{"object":{"id":"cs_test_a1","object":"checkout.session","client_reference_id":"user_42","customer":"cus_a1","subscription":"sub_a1","mode":"subscription","payment_status":"paid","status":"complete","metadata":{"plan":"pro"}}}}'''
+expect_type = "reject"
+expect_event_count = 0
+
+# Harn package dependencies live here. No sibling SDK dependency for v0.
+[dependencies]

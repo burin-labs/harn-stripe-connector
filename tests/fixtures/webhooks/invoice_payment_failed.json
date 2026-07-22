@@ -1,0 +1,21 @@
+{
+  "id": "evt_2invoice",
+  "object": "event",
+  "api_version": "2025-01-27",
+  "type": "invoice.payment_failed",
+  "created": 1776859200,
+  "livemode": false,
+  "data": {
+    "object": {
+      "id": "in_b1",
+      "object": "invoice",
+      "customer": "cus_b1",
+      "subscription": "sub_b1",
+      "status": "open",
+      "attempt_count": 2,
+      "amount_due": 4900,
+      "currency": "usd",
+      "hosted_invoice_url": "https://invoice.stripe.com/i/in_b1"
+    }
+  }
+}

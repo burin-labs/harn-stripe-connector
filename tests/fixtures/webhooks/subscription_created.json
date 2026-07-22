@@ -1,0 +1,28 @@
+{
+  "id": "evt_5subcreated",
+  "object": "event",
+  "api_version": "2025-01-27",
+  "type": "customer.subscription.created",
+  "created": 1776859200,
+  "livemode": false,
+  "data": {
+    "object": {
+      "id": "sub_n1",
+      "object": "subscription",
+      "customer": "cus_n1",
+      "status": "active",
+      "cancel_at_period_end": false,
+      "current_period_end": 1779451200,
+      "items": {
+        "object": "list",
+        "data": [
+          {
+            "id": "si_n1",
+            "object": "subscription_item",
+            "price": {"id": "price_n1", "object": "price", "recurring": {"interval": "month"}}
+          }
+        ]
+      }
+    }
+  }
+}

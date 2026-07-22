@@ -1,0 +1,79 @@
+import {
+  activate,
+  call,
+  init,
+  kinds,
+  methods,
+  normalize_inbound,
+  payload_schema,
+  provider_id,
+  shutdown,
+} from "../src/lib"
+
+/** Read a fixture JSON body from the test fixtures directory. */
+pub fn fixture_body(name) {
+  return harness.fs.read_text(source_dir() + "/fixtures/webhooks/" + name + ".json")
+}
+
+/**
+ * Compute a `Stripe-Signature` header value for a body.
+ *
+ * The signed message is `"<timestamp>.<raw_body>"`, HMAC-SHA256 keyed by the
+ * endpoint signing secret. Mirrors `__verify_signature` in src/lib.harn.
+ */
+pub fn sign(secret, body, timestamp) {
+  const v1 = hmac_sha256(to_string(secret), to_string(timestamp) + "." + body)
+  return "t=" + to_string(timestamp) + ",v1=" + v1
+}
+
+/** Current unix timestamp as an integer (within the freshness window). */
+pub fn now_ts() {
+  return to_int(harness.clock.timestamp())
+}
+
+/** Build a raw inbound envelope signed with the Stripe-Signature scheme. */
+pub fn signed_raw(secret, body, timestamp = nil) {
+  const ts = timestamp ?? now_ts()
+  return {body_text: body, headers: {"stripe-signature": sign(secret, body, ts)}}
+}
+
+/** Build a signed raw inbound envelope from a named fixture. */
+pub fn fixture_raw(name, secret, timestamp = nil) {
+  return signed_raw(secret, fixture_body(name), timestamp)
+}
+
+pub fn assert_stripe_interface() {
+  shutdown()
+  assert_eq(provider_id(), "stripe", "provider id")
+  assert_eq(kinds()[0], "webhook", "webhook kind")
+  assert_eq(payload_schema().harn_schema_name, "StripeEventPayload", "payload schema name")
+  const mutate = __method_meta(methods(), "customer.create")
+  assert(mutate.requires_approval, "customer.create requires approval")
+  const read = __method_meta(methods(), "customer.get")
+  assert(!read.requires_approval, "customer.get does not require approval")
+  const passthrough = __method_meta(methods(), "api.request")
+  assert(!passthrough.requires_approval, "api.request does not require approval")
+  const initialized = init({webhook_secret: "whsec_test"})
+  assert(initialized.initialized, "init stores state")
+  const activated = activate(
+    [{id: "primary", path: "/stripe/events", secrets: {webhook_secret: "whsec_test"}}],
+  )
+  assert_eq(activated.bindings, 1, "activate counts bindings")
+}
+
+fn __method_meta(method_list, name) {
+  for entry in method_list {
+    if entry.name == name {
+      return entry
+    }
+  }
+  return {name: name, requires_approval: false}
+}
+
+pub fn stripe_call(method, args) {
+  return call(method, args)
+}
+
+pub fn stripe_normalize(raw) {
+  return normalize_inbound(raw)
+}

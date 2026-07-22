@@ -1,0 +1,20 @@
+{
+  "id": "evt_4invoicepaid",
+  "object": "event",
+  "api_version": "2025-01-27",
+  "type": "invoice.paid",
+  "created": 1776859200,
+  "livemode": false,
+  "data": {
+    "object": {
+      "id": "in_p1",
+      "object": "invoice",
+      "customer": "cus_p1",
+      "subscription": "sub_p1",
+      "status": "paid",
+      "amount_paid": 4900,
+      "currency": "usd",
+      "hosted_invoice_url": "https://invoice.stripe.com/i/in_p1"
+    }
+  }
+}

@@ -157,6 +157,33 @@ pipeline default() {
   assert_eq(meter_body.payload.value, "5", "meter_event value is a string")
   assert_eq(meter_body.identifier, "idem_1", "meter_event identifier")
   assert_eq(meter_call.headers["content-type"], "application/json", "meter_event JSON content type")
+  assert_eq(
+    meter_call.headers["stripe-version"],
+    "2026-06-24.dahlia",
+    "meter_event pins the Stripe v2 API version",
+  )
+  // Callers can deliberately pin a different v2 version while upgrading.
+  http_mock_clear()
+  http_mock(
+    "POST",
+    base + "/v2/billing/meter_events",
+    {status: 200, body: "{\"object\":\"v2.billing.meter_event\"}"},
+  )
+  call(
+    "meter_event.create",
+    common
+      + {
+      api_version: "2026-02-25.preview",
+      event_name: "api_request",
+      stripe_customer_id: "cus_1",
+      value: 1,
+    },
+  )
+  assert_eq(
+    http_mock_calls({redact_sensitive: false})[0].headers["stripe-version"],
+    "2026-02-25.preview",
+    "meter_event accepts an explicit Stripe v2 API version",
+  )
   // meter.list / meter.create.
   http_mock_clear()
   http_mock(

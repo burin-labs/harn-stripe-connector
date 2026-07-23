@@ -5,6 +5,11 @@ this file. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Pin the required Stripe API version on v2 meter-event requests, with an
+  explicit per-call override for deliberate API upgrades.
+
 ### Added
 
 - Initial pure-Harn Stripe connector implementing the connector interface

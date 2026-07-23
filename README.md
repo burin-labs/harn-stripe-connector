@@ -98,6 +98,10 @@ stripe_connector.call("meter_event.create", {
 })
 ```
 
+The connector pins `Stripe-Version: 2026-06-24.dahlia` for this v2 call,
+because Stripe rejects unversioned `/v2` requests. Pass `api_version` to
+deliberately override the pin during an upgrade.
+
 ### Create a subscription checkout session
 
 ```harn

@@ -4,6 +4,11 @@ const STRIPE_STATE_KEY = "harn-stripe-connector.state"
 
 const STRIPE_API_BASE_URL = "https://api.stripe.com"
 
+// Stripe requires an explicit version on every /v2 request. Pin the connector
+// default so meter-event behavior does not drift with an account's settings;
+// callers can override it per request with `api_version`.
+const STRIPE_V2_API_VERSION = "2026-06-24.dahlia"
+
 const STRIPE_WEBHOOK_SECRET_ID = "stripe/webhook-secret"
 
 const MAX_BODY_BYTES = 1048576
@@ -718,7 +723,13 @@ fn __meter_event_create(args, cfg) {
   if args?.timestamp != nil {
     body = body + {timestamp: args.timestamp}
   }
-  return __post_json(cfg, "/v2/billing/meter_events", body, __idempotency_headers(args))
+  const api_version = if args?.api_version == nil || trim(to_string(args.api_version)) == "" {
+    STRIPE_V2_API_VERSION
+  } else {
+    to_string(args.api_version)
+  }
+  const headers = __idempotency_headers(args) + {"Stripe-Version": api_version}
+  return __post_json(cfg, "/v2/billing/meter_events", body, headers)
 }
 
 @complexity(allow)

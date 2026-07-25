@@ -32,6 +32,13 @@ jobs:
       # mode), which on a runner may resolve to /bin/sh (dash), not bash. No
       # bashisms (mapfile/pipefail/(( ))): keep this portable so the identical
       # template is safe across every fleet repo regardless of runner shell.
+      #
+      # Mirrors ci.yml's Harn job. The trailing two gates are what make this a
+      # connector repo rather than a plain package: the smoke scripts exercise
+      # the typed REST surface against the http mock, and `connector check`
+      # replays the 5 signed-webhook contract fixtures in harn.toml. A runtime
+      # bump that changed HMAC verification or event normalization would pass
+      # fmt/check/lint and fail only here, so both belong in the bump gate.
       validate-command: |
         set -eu
         files=$(git ls-files '*.harn')
@@ -42,6 +49,12 @@ jobs:
           harn check $files
           harn lint $files
         fi
+        for test in tests/*.harn; do
+          # Guard the literal-glob case so an empty tests/ is not an error.
+          [ -f "$test" ] || continue
+          harn run "$test"
+        done
+        harn connector check .
     secrets:
       app-client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
       app-private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}

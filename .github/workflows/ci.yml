@@ -47,8 +47,8 @@ jobs:
               exit 1
             fi
           done
-          if [[ -f CLAUDE.md ]] && ! grep -Eq '^## Provider Notes$' CLAUDE.md; then
-            echo "CLAUDE.md must keep local content under a Provider Notes section." >&2
+          if [[ -f AGENTS.md ]] && ! grep -Eiq '^## Provider notes$' AGENTS.md; then
+            echo "AGENTS.md must keep local content under a Provider notes section." >&2
             exit 1
           fi
 

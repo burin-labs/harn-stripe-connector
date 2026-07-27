@@ -1,60 +1,23 @@
-# Bump Harn Runtime — thin caller of the reusable workflow (harn#5299).
-#
-# Replaces the ~267L copied shell/YAML state machine with a trigger wrapper that
-# calls burin-labs/harn's published `workflow_call` workflow. All orchestration
-# (pin resolve, readiness gate, lockfile refresh, signed commit, PR + auto-merge)
-# lives in Harn (`std/bump/runtime`/`std/bump/live`), not here. The only
-# repo-specific parts are the schedule and the single validate-command.
 name: Bump Harn Runtime
+
+# fleet.toml in harn-bump-fleet owns the schedule and dispatches this adapter.
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Optional Harn tag (vX.Y.Z). Defaults to latest release."
+        description: "Optional exact Harn tag (vX.Y.Z). Defaults to latest."
         required: false
         type: string
-  schedule:
-    - cron: "37 9 * * *"
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 jobs:
   bump:
-    # PIN: v0.10.34 release commit of burin-labs/harn.
-    uses: burin-labs/harn/.github/workflows/bump-harn.yml@e9e1ac66009672132267261a47cdcd19705e40f1
+    uses: burin-labs/harn/.github/workflows/bump-harn.yml@e7898bd182a38422f9e012c63c8cd4c61d254932
     with:
       version: ${{ inputs.version }}
-      # This repo's single declared validation entrypoint. Runs after the pin +
-      # lockfile refresh; non-zero exit blocks the commit. POSIX-sh only — the
-      # runtime executes this through the host default shell (std/command shell
-      # mode), which on a runner may resolve to /bin/sh (dash), not bash. No
-      # bashisms (mapfile/pipefail/(( ))): keep this portable so the identical
-      # template is safe across every fleet repo regardless of runner shell.
-      #
-      # Mirrors ci.yml's Harn job. The trailing two gates are what make this a
-      # connector repo rather than a plain package: the smoke scripts exercise
-      # the typed REST surface against the http mock, and `connector check`
-      # replays the 5 signed-webhook contract fixtures in harn.toml. A runtime
-      # bump that changed HMAC verification or event normalization would pass
-      # fmt/check/lint and fail only here, so both belong in the bump gate.
-      validate-command: |
-        set -eu
-        files=$(git ls-files '*.harn')
-        if [ -n "$files" ]; then
-          # Word-splitting on $files is intentional: pass every .harn path as a
-          # separate arg. Fleet .harn paths never contain whitespace.
-          harn fmt $files
-          harn check $files
-          harn lint $files
-        fi
-        for test in tests/*.harn; do
-          # Guard the literal-glob case so an empty tests/ is not an error.
-          [ -f "$test" ] || continue
-          harn run "$test"
-        done
-        harn connector check .
+      validate-command: harn package verify .
     secrets:
       app-client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
       app-private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}

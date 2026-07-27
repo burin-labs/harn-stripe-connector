@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   harn:
-    uses: burin-labs/.github/.github/workflows/harn-package.yml@bcdcf64e5c7021f649432b77fe2e1f9f489c4824
+    uses: burin-labs/.github/.github/workflows/harn-package.yml@1acf9aba857a8eb512014d7097bfb22b2e751ff8
 
   ci-status:
     name: CI status

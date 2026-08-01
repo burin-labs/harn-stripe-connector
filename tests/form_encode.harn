@@ -5,15 +5,15 @@ import { call } from "../src/lib"
 // records the encoded request body, so these are true encoder assertions rather
 // than a re-implementation.
 @complexity(allow)
-pipeline default() {
-  egress_policy({allow: ["stripe-api.test"], default: "deny"})
-  http_mock_clear()
+pipeline test_form_encode(harness: Harness, task) {
+  harness.testing.http_mock_clear()
   const base = "https://stripe-api.test"
   const key = "sk_test_123"
   // Nested dicts, lists of dicts, booleans, url-encoded scalars, nil omission,
   // and deterministic alphabetical key ordering.
-  http_mock("POST", base + "/v1/echo", {status: 200, body: "{\"ok\":true}"})
+  harness.testing.http_mock("POST", base + "/v1/echo", {status: 200, body: "{\"ok\":true}"})
   call(
+    harness,
     "api.request",
     {
       api_base_url: base,
@@ -30,7 +30,7 @@ pipeline default() {
       path: "/v1/echo",
     },
   )
-  const encoded = http_mock_calls()[0].body
+  const encoded = harness.testing.http_mock_calls({include_sensitive: true})[0].body
   assert_eq(
     encoded,
     "active=true&disabled=false&line_items[0][price]=p1&line_items[0][quantity]=2"
@@ -39,12 +39,17 @@ pipeline default() {
     "nested form encoding is deterministic and url-encoded",
   )
   // Empty body encodes to the empty string.
-  http_mock_clear()
-  http_mock("POST", base + "/v1/empty", {status: 200, body: "{}"})
+  harness.testing.http_mock_clear()
+  harness.testing.http_mock("POST", base + "/v1/empty", {status: 200, body: "{}"})
   call(
+    harness,
     "api.request",
     {api_base_url: base, api_key: key, body: {}, method: "POST", path: "/v1/empty"},
   )
-  assert_eq(http_mock_calls()[0].body, "", "empty dict encodes to empty string")
-  http_mock_clear()
+  assert_eq(
+    harness.testing.http_mock_calls({include_sensitive: true})[0].body,
+    "",
+    "empty dict encodes to empty string",
+  )
+  harness.testing.http_mock_clear()
 }

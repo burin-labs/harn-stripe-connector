@@ -47,6 +47,10 @@ const STRIPE_MUTATING_METHODS = [
 
 const STRIPE_OUTBOUND_METHODS = STRIPE_READ_METHODS + STRIPE_MUTATING_METHODS
 
+type StripeTransport = {clock: HarnessClock, net: HarnessNet}
+
+type StripeOutboundConfig = {api_base_url: string, api_key: string, transport: StripeTransport}
+
 /** Return this connector's Harn provider id. */
 pub fn provider_id() {
   return STRIPE_PROVIDER_ID
@@ -98,14 +102,19 @@ pub fn payload_schema() {
 }
 
 /** Initialize connector state with orchestrator context. */
-pub fn init(ctx = nil) {
-  const next = __state() + {initialized: true, ctx: ctx ?? {}}
-  __set_state(next)
+pub fn init(harness: Harness, ctx = nil) {
+  const next = __state(harness.runtime)
+    + {
+    initialized: true,
+    initialized_at_ms: harness.clock.now_ms(),
+    ctx: ctx ?? {},
+  }
+  __set_state(harness.runtime, next)
   return next
 }
 
 /** Activate webhook bindings and reject duplicate configured paths. */
-pub fn activate(bindings = []) {
+pub fn activate(harness: Harness, bindings = []) {
   let by_id = {}
   let seen_paths = {}
   for binding in bindings ?? [] {
@@ -123,15 +132,20 @@ pub fn activate(bindings = []) {
     }
     by_id[binding_id] = binding + {binding_id: binding_id}
   }
-  const next = __state() + {active: true, bindings: by_id}
-  __set_state(next)
+  const next = __state(harness.runtime)
+    + {
+    active: true,
+    activated_at_ms: harness.clock.now_ms(),
+    bindings: by_id,
+  }
+  __set_state(harness.runtime, next)
   return {bindings: len(by_id.keys()), kind: "webhook", provider: STRIPE_PROVIDER_ID}
 }
 
 /** Clear connector lifecycle state. */
-pub fn shutdown() {
-  store_delete(STRIPE_STATE_KEY)
-  return {active: false, provider: STRIPE_PROVIDER_ID}
+pub fn shutdown(harness: Harness) {
+  harness.runtime.store_delete(STRIPE_STATE_KEY)
+  return {active: false, provider: STRIPE_PROVIDER_ID, shutdown_at_ms: harness.clock.now_ms()}
 }
 
 @complexity(allow)
@@ -146,13 +160,13 @@ pub fn shutdown() {
  *
  * Fails closed when no webhook signing secret is configured.
  */
-pub fn normalize_inbound(raw) {
+pub fn normalize_inbound(harness: Harness, raw) {
   const body_text = raw?.body_text ?? raw?.body ?? ""
   if len(body_text) > MAX_BODY_BYTES {
     return __reject(413, "payload_too_large", "stripe webhook body exceeds 1 MiB cap")
   }
   const headers = raw?.headers ?? {}
-  const verified = __verify_webhook(raw, headers, body_text)
+  const verified = __verify_webhook(harness, raw, headers, body_text)
   if is_err(verified) {
     return __reject_err(unwrap_err(verified))
   }
@@ -173,27 +187,38 @@ pub fn normalize_inbound(raw) {
 
 @complexity(allow)
 /** Dispatch a supported Stripe REST method. */
-pub fn call(method, args = {}) {
+pub fn call(harness: Harness, method, args = {}) {
   if !contains(STRIPE_OUTBOUND_METHODS, method) {
     return __err(
       "method_not_found",
       "stripe connector does not implement outbound method `" + method + "`",
     )
   }
-  const config = __outbound_config(args ?? {})
+  const config = __outbound_config(
+    harness.env,
+    harness.secrets,
+    harness.net,
+    harness.clock,
+    args ?? {},
+  )
   if is_err(config) {
     return config
   }
   return __dispatch(method, args ?? {}, unwrap(config))
 }
 
-fn __state() {
-  return store_get(STRIPE_STATE_KEY)
-    ?? {active: false, bindings: {}, ctx: {}, initialized: false}
+fn __state(runtime: HarnessRuntime) {
+  return runtime.store_get(STRIPE_STATE_KEY)
+    ?? {
+    active: false,
+    bindings: {},
+    ctx: {},
+    initialized: false,
+  }
 }
 
-fn __set_state(state) {
-  store_set(STRIPE_STATE_KEY, state)
+fn __set_state(runtime: HarnessRuntime, state) {
+  runtime.store_set(STRIPE_STATE_KEY, state)
   return state
 }
 
@@ -247,9 +272,9 @@ fn __first_nonempty(candidates) {
 }
 
 /** Read a secret id, returning nil when it resolves to an empty/absent value. */
-fn __resolve_secret(secret_id) {
+fn __resolve_secret(secrets: HarnessSecrets, secret_id) {
   const resolved = try {
-    secret_get(secret_id)
+    secrets.read(secret_id)
   }
   if is_err(resolved) {
     return nil
@@ -261,17 +286,17 @@ fn __resolve_secret(secret_id) {
   return value
 }
 
-fn __binding(raw) {
+fn __binding(runtime: HarnessRuntime, raw) {
   const binding_id = raw?.metadata?.binding_id ?? raw?.binding_id
   if binding_id == nil {
     return nil
   }
-  return (__state().bindings ?? {}).get(binding_id)
+  return (__state(runtime).bindings ?? {}).get(binding_id)
 }
 
-fn __webhook_secret(raw) {
-  const state = __state()
-  const binding = __binding(raw)
+fn __webhook_secret(runtime: HarnessRuntime, secrets: HarnessSecrets, raw) {
+  const state = __state(runtime)
+  const binding = __binding(runtime, raw)
   const inline = __first_nonempty(
     [
       state.ctx?.webhook_secret,
@@ -284,12 +309,12 @@ fn __webhook_secret(raw) {
   if inline != nil {
     return inline
   }
-  return __resolve_secret(__webhook_secret_id(raw) ?? STRIPE_WEBHOOK_SECRET_ID)
+  return __resolve_secret(secrets, __webhook_secret_id(runtime, raw) ?? STRIPE_WEBHOOK_SECRET_ID)
 }
 
-fn __webhook_secret_id(raw) {
+fn __webhook_secret_id(runtime: HarnessRuntime, raw) {
   const metadata = raw?.metadata ?? {}
-  const binding = __binding(raw)
+  const binding = __binding(runtime, raw)
   return __first_nonempty(
     [
       metadata?.secret_ids?.webhook_secret,
@@ -301,8 +326,8 @@ fn __webhook_secret_id(raw) {
   )
 }
 
-fn __verify_webhook(raw, headers, body_text) {
-  const secret = __webhook_secret(raw)
+fn __verify_webhook(harness: Harness, raw, headers, body_text) {
+  const secret = __webhook_secret(harness.runtime, harness.secrets, raw)
   if secret == nil || trim(to_string(secret)) == "" {
     return __err(
       "missing_secret",
@@ -313,11 +338,11 @@ fn __verify_webhook(raw, headers, body_text) {
   if signature_header == nil || signature_header == "" {
     return __err("missing_signature", "missing Stripe-Signature header")
   }
-  return __verify_signature(raw, signature_header, body_text, to_string(secret))
+  return __verify_signature(harness.clock, raw, signature_header, body_text, to_string(secret))
 }
 
 @complexity(allow)
-fn __verify_signature(raw, signature_header, body_text, secret) {
+fn __verify_signature(clock: HarnessClock, raw, signature_header, body_text, secret) {
   const fields = __parse_signature_header(signature_header)
   const timestamp = fields.t
   const signatures = fields.v1
@@ -344,7 +369,7 @@ fn __verify_signature(raw, signature_header, body_text, secret) {
   if is_err(parsed_ts) {
     return __err("invalid_signature", "Stripe-Signature timestamp is not an integer")
   }
-  const now = __verification_timestamp(raw)
+  const now = __verification_timestamp(clock, raw)
   const age = now - unwrap(parsed_ts)
   if age > SIGNATURE_MAX_AGE_SECONDS || age < -SIGNATURE_MAX_AGE_SECONDS {
     return __err(
@@ -356,7 +381,7 @@ fn __verify_signature(raw, signature_header, body_text, secret) {
   return Ok("signed")
 }
 
-fn __verification_timestamp(raw) {
+fn __verification_timestamp(clock: HarnessClock, raw) {
   const received_at = raw?.received_at
   if received_at != nil && trim(to_string(received_at)) != "" {
     const parsed = try {
@@ -366,7 +391,7 @@ fn __verification_timestamp(raw) {
       return to_int(unwrap(parsed))
     }
   }
-  return to_int(harness.clock.timestamp())
+  return to_int(clock.timestamp())
 }
 
 @complexity(allow)
@@ -827,19 +852,34 @@ fn __upcase_method(method) {
 }
 
 @complexity(allow)
-fn __outbound_config(args) {
-  const env_base = harness.env.get_or("STRIPE_API_BASE_URL", STRIPE_API_BASE_URL)
+fn __outbound_config(
+  env: HarnessEnv,
+  secrets: HarnessSecrets,
+  net: HarnessNet,
+  clock: HarnessClock,
+  args,
+) {
+  const env_base = env.get_or("STRIPE_API_BASE_URL", STRIPE_API_BASE_URL)
   const api_base_url = args?.api_base_url ?? env_base
   const base_check = __validate_url_host(api_base_url, "api_base_url")
   if is_err(base_check) {
     return base_check
   }
-  const env_key = harness.env.get("STRIPE_API_KEY") ?? harness.env.get("STRIPE_SECRET_KEY")
+  const env_key = env.get("STRIPE_API_KEY") ?? env.get("STRIPE_SECRET_KEY")
   const api_key = args?.api_key ?? args?.secret ?? args?.secrets?.api_key ?? env_key
+    ?? __resolve_secret(
+    secrets,
+    "stripe/api-key",
+  )
   if api_key == nil || trim(to_string(api_key)) == "" {
     return __err("missing_key", "stripe connector requires api_key (Bearer) for outbound calls")
   }
-  return Ok({api_base_url: to_string(api_base_url), api_key: to_string(api_key)})
+  const config: StripeOutboundConfig = {
+    api_base_url: to_string(api_base_url),
+    api_key: to_string(api_key),
+    transport: {clock: clock, net: net},
+  }
+  return Ok(config)
 }
 
 fn __api_url(api_base_url, path) {
@@ -976,7 +1016,7 @@ fn __stripe_request(method, url, body_kind, body, cfg, extra_headers) {
   let retried_rate_limit = false
   while true {
     const response_result = try {
-      harness.net.request(method, url, options)
+      cfg.transport.net.request(method, url, options)
     }
     if is_err(response_result) {
       return __err("transport", to_string(unwrap_err(response_result)))
@@ -984,7 +1024,7 @@ fn __stripe_request(method, url, body_kind, body, cfg, extra_headers) {
     const response = unwrap(response_result)
     if (response.status == 429 || response.status == 503) && !retried_rate_limit {
       retried_rate_limit = true
-      __sleep_for_retry(response)
+      __sleep_for_retry(cfg.transport.clock, response)
       continue
     }
     if response.status < 200 || response.status >= 300 {
@@ -1005,7 +1045,7 @@ fn __stripe_request(method, url, body_kind, body, cfg, extra_headers) {
   }
 }
 
-fn __sleep_for_retry(response) {
+fn __sleep_for_retry(clock: HarnessClock, response) {
   const retry_after = __header(response.headers ?? {}, "retry-after")
   if retry_after == nil || trim(to_string(retry_after)) == "" {
     return nil
@@ -1018,7 +1058,7 @@ fn __sleep_for_retry(response) {
   }
   const seconds = unwrap(parsed)
   if seconds > 0 && seconds <= 60 {
-    sleep(seconds * 1000)
+    clock.sleep_ms(seconds * 1000)
   }
   return nil
 }

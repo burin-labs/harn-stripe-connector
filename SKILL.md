@@ -51,12 +51,11 @@ trigger meter_usage on stripe {
   source = { kind: "webhook", events: ["invoice.paid"] }
   on event {
     // v2 meter events send `value` as a string; `identifier` is the idempotency key.
-    stripe_connector.call("meter_event.create", {
+    stripe_connector.call(harness, "meter_event.create", {
       event_name: "api_request",
       stripe_customer_id: event.payload.customer,
       value: usage_for(event.payload.customer),
       identifier: event.payload.event_id,
-      api_key: env("STRIPE_API_KEY"),
     })
   }
 }
@@ -66,13 +65,12 @@ trigger meter_usage on stripe {
 
 ```harn
 // Immediate: DELETE /v1/subscriptions/{id}
-stripe_connector.call("subscription.cancel", {id: "sub_123", api_key: env("STRIPE_API_KEY")})
+stripe_connector.call(harness, "subscription.cancel", {id: "sub_123"})
 
 // Scheduled: POST cancel_at_period_end=true
-stripe_connector.call("subscription.cancel", {
+stripe_connector.call(harness, "subscription.cancel", {
   id: "sub_123",
   at_period_end: true,
-  api_key: env("STRIPE_API_KEY"),
 })
 ```
 

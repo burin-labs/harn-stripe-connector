@@ -10,13 +10,16 @@ import {
 } from "./helpers"
 
 @complexity(allow)
-pipeline default() {
+pipeline test_normalize_events(harness: Harness, task) {
   const secret = "whsec_test"
-  assert_stripe_interface()
-  shutdown()
-  init({webhook_secret: secret})
+  assert_stripe_interface(harness)
+  shutdown(harness)
+  init(harness, {webhook_secret: secret})
   // checkout.session.completed -> checkout.completed, with flat fields extracted.
-  const checkout = stripe_normalize(fixture_raw("checkout_session_completed", secret))
+  const checkout = stripe_normalize(
+    harness,
+    fixture_raw(harness, "checkout_session_completed", secret),
+  )
   assert_eq(checkout.type, "event", "checkout envelope type")
   assert_eq(checkout.event.kind, "checkout.completed", "checkout kind")
   assert_eq(checkout.event.signature_status.state, "verified", "checkout signed")
@@ -31,26 +34,26 @@ pipeline default() {
   assert_eq(checkout.event.payload.metadata.plan, "pro", "checkout metadata")
   assert_eq(checkout.event.payload.raw.data.object.id, "cs_test_a1", "checkout raw preserved")
   // invoice.paid -> invoice.paid.
-  const paid = stripe_normalize(fixture_raw("invoice_paid", secret))
+  const paid = stripe_normalize(harness, fixture_raw(harness, "invoice_paid", secret))
   assert_eq(paid.event.kind, "invoice.paid", "invoice paid kind")
   assert_eq(paid.event.payload.customer, "cus_p1", "invoice paid customer")
   assert_eq(paid.event.payload.subscription, "sub_p1", "invoice paid subscription")
   assert_eq(paid.event.payload.status, "paid", "invoice paid status")
   assert_eq(paid.event.dedupe_key, "stripe:evt_4invoicepaid", "invoice paid dedupe key")
   // invoice.payment_failed -> invoice.payment_failed.
-  const failed = stripe_normalize(fixture_raw("invoice_payment_failed", secret))
+  const failed = stripe_normalize(harness, fixture_raw(harness, "invoice_payment_failed", secret))
   assert_eq(failed.event.kind, "invoice.payment_failed", "invoice failed kind")
   assert_eq(failed.event.payload.customer, "cus_b1", "invoice failed customer")
   assert_eq(failed.event.payload.subscription, "sub_b1", "invoice failed subscription")
   assert_eq(failed.event.payload.status, "open", "invoice failed status")
   // customer.subscription.created -> subscription.created, id from data.object.id.
-  const created = stripe_normalize(fixture_raw("subscription_created", secret))
+  const created = stripe_normalize(harness, fixture_raw(harness, "subscription_created", secret))
   assert_eq(created.event.kind, "subscription.created", "subscription created kind")
   assert_eq(created.event.payload.subscription, "sub_n1", "subscription id from object id")
   assert_eq(created.event.payload.customer, "cus_n1", "subscription created customer")
   assert_eq(created.event.payload.status, "active", "subscription created status")
   // customer.subscription.deleted -> subscription.deleted.
-  const deleted = stripe_normalize(fixture_raw("subscription_deleted", secret))
+  const deleted = stripe_normalize(harness, fixture_raw(harness, "subscription_deleted", secret))
   assert_eq(deleted.event.kind, "subscription.deleted", "subscription deleted kind")
   assert_eq(deleted.event.payload.subscription, "sub_c1", "subscription deleted id")
   assert_eq(deleted.event.payload.status, "canceled", "subscription deleted status")
@@ -59,18 +62,19 @@ pipeline default() {
   // Unknown-but-verified event type passes through under the generic `event` kind.
   const unknown_body =
     "{\"id\":\"evt_unknown\",\"type\":\"charge.succeeded\",\"livemode\":false,\"data\":{\"object\":{\"id\":\"ch_1\",\"customer\":\"cus_x1\"}}}"
-  const unknown = stripe_normalize(signed_raw(secret, unknown_body))
+  const unknown = stripe_normalize(harness, signed_raw(harness.clock, secret, unknown_body))
   assert_eq(unknown.type, "event", "unknown event accepted")
   assert_eq(unknown.event.kind, "event", "unknown event generic kind")
   assert_eq(unknown.event.payload.event_type, "charge.succeeded", "unknown event_type preserved")
   assert_eq(unknown.event.payload.customer, "cus_x1", "unknown event customer")
   assert_eq(unknown.event.dedupe_key, "stripe:evt_unknown", "unknown event dedupe key")
   // Multiple v1 signatures: accept when ANY entry matches (bogus first, real second).
-  const multi_body = fixture_body("checkout_session_completed")
-  const ts = now_ts()
+  const multi_body = fixture_body(harness.fs, "checkout_session_completed")
+  const ts = now_ts(harness.clock)
   const real = sign(secret, multi_body, ts)
   const bogus = "0000000000000000000000000000000000000000000000000000000000000000"
   const multi = stripe_normalize(
+    harness,
     {body_text: multi_body, headers: {"stripe-signature": real + ",v1=" + bogus}},
   )
   assert_eq(multi.type, "event", "multiple v1 signatures accepted")
@@ -78,39 +82,47 @@ pipeline default() {
   // Tampered body -> signature mismatch -> 401.
   const tampered_body = replace(multi_body, "cus_a1", "cus_evil")
   const tampered = stripe_normalize(
+    harness,
     {body_text: tampered_body, headers: {"stripe-signature": sign(secret, multi_body, ts)}},
   )
   assert_eq(tampered.type, "reject", "tampered body rejected")
   assert_eq(tampered.reject.status, 401, "tampered 401")
   // Wrong secret -> signature mismatch -> 401.
   const wrong = stripe_normalize(
+    harness,
     {body_text: multi_body, headers: {"stripe-signature": sign("whsec_wrong", multi_body, ts)}},
   )
   assert_eq(wrong.type, "reject", "wrong secret rejected")
   assert_eq(wrong.reject.status, 401, "wrong secret 401")
   // Stale timestamp (outside the 5-minute window) -> 401 even with a valid HMAC.
-  const stale = stripe_normalize(signed_raw(secret, multi_body, now_ts() - 600))
+  const stale = stripe_normalize(
+    harness,
+    signed_raw(harness.clock, secret, multi_body, now_ts(harness.clock) - 600),
+  )
   assert_eq(stale.type, "reject", "stale signature rejected")
   assert_eq(stale.reject.status, 401, "stale 401")
   // Missing Stripe-Signature header -> 401.
-  const unsigned = stripe_normalize({body_text: multi_body, headers: {}})
+  const unsigned = stripe_normalize(harness, {body_text: multi_body, headers: {}})
   assert_eq(unsigned.type, "reject", "missing signature rejected")
   assert_eq(unsigned.reject.status, 401, "missing signature 401")
   // Fail closed: no signing secret configured -> 401.
-  shutdown()
-  const unset = stripe_normalize(fixture_raw("checkout_session_completed", secret))
+  shutdown(harness)
+  const unset = stripe_normalize(
+    harness,
+    fixture_raw(harness, "checkout_session_completed", secret),
+  )
   assert_eq(unset.type, "reject", "missing secret fails closed")
   assert_eq(unset.reject.status, 401, "missing secret 401")
   // Invalid JSON (after a valid signature) -> 400.
-  init({webhook_secret: secret})
+  init(harness, {webhook_secret: secret})
   const bad_json = "{not json"
-  const invalid = stripe_normalize(signed_raw(secret, bad_json))
+  const invalid = stripe_normalize(harness, signed_raw(harness.clock, secret, bad_json))
   assert_eq(invalid.type, "reject", "invalid json rejected")
   assert_eq(invalid.reject.status, 400, "invalid json 400")
   // Verified body missing `type` -> 400.
   const no_type = "{\"id\":\"evt_notype\",\"data\":{\"object\":{}}}"
-  const missing = stripe_normalize(signed_raw(secret, no_type))
+  const missing = stripe_normalize(harness, signed_raw(harness.clock, secret, no_type))
   assert_eq(missing.type, "reject", "missing type rejected")
   assert_eq(missing.reject.status, 400, "missing type 400")
-  shutdown()
+  shutdown(harness)
 }

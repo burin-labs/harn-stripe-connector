@@ -89,12 +89,11 @@ The dedupe key is `stripe:<event_id>`.
 ### Report metered usage (v2)
 
 ```harn
-stripe_connector.call("meter_event.create", {
+stripe_connector.call(harness, "meter_event.create", {
   event_name: "api_request",
   stripe_customer_id: event.payload.customer,
   value: 5,               // v2 sends value as a string on the wire
   identifier: "req_" + request_id,   // idempotency for the meter event
-  api_key: env("STRIPE_API_KEY"),
 })
 ```
 
@@ -105,7 +104,7 @@ deliberately override the pin during an upgrade.
 ### Create a subscription checkout session
 
 ```harn
-stripe_connector.call("checkout_session.create", {
+stripe_connector.call(harness, "checkout_session.create", {
   mode: "subscription",
   line_items: [{price: "price_pro_monthly", quantity: 1}, {price: "price_metered"}],
   success_url: "https://app.example.com/welcome",
@@ -114,7 +113,6 @@ stripe_connector.call("checkout_session.create", {
   subscription_metadata: {team: "acme"},
   allow_promotion_codes: true,
   idempotency_key: "checkout_user_42",
-  api_key: env("STRIPE_API_KEY"),
 })
 ```
 

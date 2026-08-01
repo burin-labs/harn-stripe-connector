@@ -7,6 +7,10 @@ this file. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0
 
 ### Fixed
 
+- Move connector lifecycle, inbound normalization, outbound calls, state,
+  secrets, time, and network effects onto the typed `Harness` boundary required
+  by current Harn runtimes. This removes the legacy ambient runtime dependency
+  and restores strict checking and package verification on Harn v0.10.48.
 - Pin the required Stripe API version on v2 meter-event requests, with an
   explicit per-call override for deliberate API upgrades.
 
@@ -27,7 +31,7 @@ this file. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0
   `subscription.<verb>`, and any other verified event to the generic `event`
   kind rather than being rejected. Dedup is on the Stripe event id
   (`stripe:<evt_id>`).
-- Outbound `call(method, args)` dispatch for customers, checkout sessions,
+- Outbound `call(harness, method, args)` dispatch for customers, checkout sessions,
   billing portal sessions, subscriptions (get / update / cancel), meters, meter
   events (v2 JSON), products, prices, webhook endpoints, and test clocks, plus a
   raw `api.request` escape hatch. Mutating methods are flagged

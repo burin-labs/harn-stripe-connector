@@ -12,18 +12,15 @@ permissions:
 
 jobs:
   harn:
-    uses: burin-labs/.github/.github/workflows/harn-package.yml@c5c3362bd344a549d6e5ed5418d5932405443738
+    uses: burin-labs/.github/.github/workflows/harn-package.yml@a556b40acf7cbb278bd9b25b293fd99603656ef8
 
   ci-status:
     name: CI status
-    if: always()
+    if: ${{ always() }}
     needs: [harn]
     runs-on: ubuntu-latest
     steps:
-      - name: Check for failures
-        run: |
-          if [[ "${{ contains(needs.*.result, 'failure') }}" == "true" ]]; then
-            echo "Harn package verification failed"
-            exit 1
-          fi
-          echo "Harn package verification passed or was skipped"
+      - name: Enforce required jobs
+        uses: burin-labs/.github/.github/actions/require-successful-needs@a556b40acf7cbb278bd9b25b293fd99603656ef8
+        with:
+          results-json: ${{ toJSON(needs.*.result) }}

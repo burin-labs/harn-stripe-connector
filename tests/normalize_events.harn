@@ -18,7 +18,7 @@ pipeline test_normalize_events(harness: Harness, task) {
   // checkout.session.completed -> checkout.completed, with flat fields extracted.
   const checkout = stripe_normalize(
     harness,
-    fixture_raw(harness, "checkout_session_completed", secret),
+    fixture_raw({clock: harness.clock, fs: harness.fs}, "checkout_session_completed", secret),
   )
   assert_eq(checkout.type, "event", "checkout envelope type")
   assert_eq(checkout.event.kind, "checkout.completed", "checkout kind")
@@ -34,26 +34,38 @@ pipeline test_normalize_events(harness: Harness, task) {
   assert_eq(checkout.event.payload.metadata.plan, "pro", "checkout metadata")
   assert_eq(checkout.event.payload.raw.data.object.id, "cs_test_a1", "checkout raw preserved")
   // invoice.paid -> invoice.paid.
-  const paid = stripe_normalize(harness, fixture_raw(harness, "invoice_paid", secret))
+  const paid = stripe_normalize(
+    harness,
+    fixture_raw({clock: harness.clock, fs: harness.fs}, "invoice_paid", secret),
+  )
   assert_eq(paid.event.kind, "invoice.paid", "invoice paid kind")
   assert_eq(paid.event.payload.customer, "cus_p1", "invoice paid customer")
   assert_eq(paid.event.payload.subscription, "sub_p1", "invoice paid subscription")
   assert_eq(paid.event.payload.status, "paid", "invoice paid status")
   assert_eq(paid.event.dedupe_key, "stripe:evt_4invoicepaid", "invoice paid dedupe key")
   // invoice.payment_failed -> invoice.payment_failed.
-  const failed = stripe_normalize(harness, fixture_raw(harness, "invoice_payment_failed", secret))
+  const failed = stripe_normalize(
+    harness,
+    fixture_raw({clock: harness.clock, fs: harness.fs}, "invoice_payment_failed", secret),
+  )
   assert_eq(failed.event.kind, "invoice.payment_failed", "invoice failed kind")
   assert_eq(failed.event.payload.customer, "cus_b1", "invoice failed customer")
   assert_eq(failed.event.payload.subscription, "sub_b1", "invoice failed subscription")
   assert_eq(failed.event.payload.status, "open", "invoice failed status")
   // customer.subscription.created -> subscription.created, id from data.object.id.
-  const created = stripe_normalize(harness, fixture_raw(harness, "subscription_created", secret))
+  const created = stripe_normalize(
+    harness,
+    fixture_raw({clock: harness.clock, fs: harness.fs}, "subscription_created", secret),
+  )
   assert_eq(created.event.kind, "subscription.created", "subscription created kind")
   assert_eq(created.event.payload.subscription, "sub_n1", "subscription id from object id")
   assert_eq(created.event.payload.customer, "cus_n1", "subscription created customer")
   assert_eq(created.event.payload.status, "active", "subscription created status")
   // customer.subscription.deleted -> subscription.deleted.
-  const deleted = stripe_normalize(harness, fixture_raw(harness, "subscription_deleted", secret))
+  const deleted = stripe_normalize(
+    harness,
+    fixture_raw({clock: harness.clock, fs: harness.fs}, "subscription_deleted", secret),
+  )
   assert_eq(deleted.event.kind, "subscription.deleted", "subscription deleted kind")
   assert_eq(deleted.event.payload.subscription, "sub_c1", "subscription deleted id")
   assert_eq(deleted.event.payload.status, "canceled", "subscription deleted status")
@@ -109,7 +121,7 @@ pipeline test_normalize_events(harness: Harness, task) {
   shutdown(harness)
   const unset = stripe_normalize(
     harness,
-    fixture_raw(harness, "checkout_session_completed", secret),
+    fixture_raw({clock: harness.clock, fs: harness.fs}, "checkout_session_completed", secret),
   )
   assert_eq(unset.type, "reject", "missing secret fails closed")
   assert_eq(unset.reject.status, 401, "missing secret 401")

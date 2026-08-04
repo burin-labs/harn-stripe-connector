@@ -204,7 +204,7 @@ pub fn call(harness: Harness, method, args = {}) {
   if is_err(config) {
     return config
   }
-  return __dispatch(method, args ?? {}, unwrap(config))
+  return __dispatch(harness.clock, method, args ?? {}, unwrap(config))
 }
 
 fn __state(runtime: HarnessRuntime) {
@@ -498,12 +498,13 @@ fn __idempotency_headers(args) {
 }
 
 @complexity(allow)
-fn __dispatch(method, args, cfg) {
+fn __dispatch(harness: HarnessClock, method, args, cfg) {
   if method == "api.request" {
-    return __api_request(args, cfg)
+    return __api_request(harness, args, cfg)
   }
   if method == "customer.create" {
     return __post_form(
+      harness,
       cfg,
       "/v1/customers",
       {email: args?.email, metadata: args?.metadata, name: args?.name},
@@ -515,10 +516,10 @@ fn __dispatch(method, args, cfg) {
     if is_err(id) {
       return id
     }
-    return __get(cfg, "/v1/customers/" + url_encode(unwrap(id)))
+    return __get(harness, cfg, "/v1/customers/" + url_encode(unwrap(id)))
   }
   if method == "checkout_session.create" {
-    return __checkout_session_create(args, cfg)
+    return __checkout_session_create(harness, args, cfg)
   }
   if method == "billing_portal_session.create" {
     const customer = __require(args, "customer")
@@ -526,6 +527,7 @@ fn __dispatch(method, args, cfg) {
       return customer
     }
     return __post_form(
+      harness,
       cfg,
       "/v1/billing_portal/sessions",
       {customer: unwrap(customer), return_url: args?.return_url},
@@ -537,7 +539,7 @@ fn __dispatch(method, args, cfg) {
     if is_err(id) {
       return id
     }
-    return __get(cfg, "/v1/subscriptions/" + url_encode(unwrap(id)))
+    return __get(harness, cfg, "/v1/subscriptions/" + url_encode(unwrap(id)))
   }
   if method == "subscription.update" {
     const id = __require(args, "id")
@@ -545,6 +547,7 @@ fn __dispatch(method, args, cfg) {
       return id
     }
     return __post_form(
+      harness,
       cfg,
       "/v1/subscriptions/" + url_encode(unwrap(id)),
       args?.body ?? {},
@@ -552,13 +555,13 @@ fn __dispatch(method, args, cfg) {
     )
   }
   if method == "subscription.cancel" {
-    return __subscription_cancel(args, cfg)
+    return __subscription_cancel(harness, args, cfg)
   }
   if method == "meter_event.create" {
-    return __meter_event_create(args, cfg)
+    return __meter_event_create(harness, args, cfg)
   }
   if method == "meter.list" {
-    return __get(cfg, "/v1/billing/meters")
+    return __get(harness, cfg, "/v1/billing/meters")
   }
   if method == "meter.create" {
     const display_name = __require(args, "display_name")
@@ -570,6 +573,7 @@ fn __dispatch(method, args, cfg) {
       return event_name
     }
     return __post_form(
+      harness,
       cfg,
       "/v1/billing/meters",
       {
@@ -581,7 +585,7 @@ fn __dispatch(method, args, cfg) {
     )
   }
   if method == "product.list" {
-    return __get(cfg, "/v1/products")
+    return __get(harness, cfg, "/v1/products")
   }
   if method == "product.create" {
     const name = __require(args, "name")
@@ -589,6 +593,7 @@ fn __dispatch(method, args, cfg) {
       return name
     }
     return __post_form(
+      harness,
       cfg,
       "/v1/products",
       {metadata: args?.metadata, name: unwrap(name)},
@@ -596,13 +601,13 @@ fn __dispatch(method, args, cfg) {
     )
   }
   if method == "price.list" {
-    return __get(cfg, __with_query("/v1/prices", {lookup_keys: args?.lookup_keys}))
+    return __get(harness, cfg, __with_query("/v1/prices", {lookup_keys: args?.lookup_keys}))
   }
   if method == "price.create" {
-    return __price_create(args, cfg)
+    return __price_create(harness, args, cfg)
   }
   if method == "webhook_endpoint.list" {
-    return __get(cfg, "/v1/webhook_endpoints")
+    return __get(harness, cfg, "/v1/webhook_endpoints")
   }
   if method == "webhook_endpoint.create" {
     const url_value = __require(args, "url")
@@ -610,6 +615,7 @@ fn __dispatch(method, args, cfg) {
       return url_value
     }
     return __post_form(
+      harness,
       cfg,
       "/v1/webhook_endpoints",
       {enabled_events: args?.enabled_events, url: unwrap(url_value)},
@@ -622,6 +628,7 @@ fn __dispatch(method, args, cfg) {
       return frozen_time
     }
     return __post_form(
+      harness,
       cfg,
       "/v1/test_helpers/test_clocks",
       {frozen_time: unwrap(frozen_time), name: args?.name},
@@ -638,6 +645,7 @@ fn __dispatch(method, args, cfg) {
       return frozen_time
     }
     return __post_form(
+      harness,
       cfg,
       "/v1/test_helpers/test_clocks/" + url_encode(unwrap(id)) + "/advance",
       {frozen_time: unwrap(frozen_time)},
@@ -651,7 +659,7 @@ fn __dispatch(method, args, cfg) {
 }
 
 @complexity(allow)
-fn __checkout_session_create(args, cfg) {
+fn __checkout_session_create(harness: HarnessClock, args, cfg) {
   const success_url = __require(args, "success_url")
   if is_err(success_url) {
     return success_url
@@ -681,10 +689,10 @@ fn __checkout_session_create(args, cfg) {
   if args?.allow_promotion_codes != nil {
     body = body + {allow_promotion_codes: args.allow_promotion_codes}
   }
-  return __post_form(cfg, "/v1/checkout/sessions", body, __idempotency_headers(args))
+  return __post_form(harness, cfg, "/v1/checkout/sessions", body, __idempotency_headers(args))
 }
 
-fn __subscription_cancel(args, cfg) {
+fn __subscription_cancel(harness: HarnessClock, args, cfg) {
   const id = __require(args, "id")
   if is_err(id) {
     return id
@@ -693,13 +701,27 @@ fn __subscription_cancel(args, cfg) {
   if args?.at_period_end == true {
     // Schedule cancellation at the end of the current period instead of
     // deleting the subscription immediately.
-    return __post_form(cfg, path, {cancel_at_period_end: true}, __idempotency_headers(args))
+    return __post_form(
+      harness,
+      cfg,
+      path,
+      {cancel_at_period_end: true},
+      __idempotency_headers(args),
+    )
   }
-  return __stripe_request("DELETE", __api_url(cfg.api_base_url, path), "none", nil, cfg, {})
+  return __stripe_request(
+    harness,
+    "DELETE",
+    __api_url(cfg.api_base_url, path),
+    "none",
+    nil,
+    cfg,
+    {},
+  )
 }
 
 @complexity(allow)
-fn __price_create(args, cfg) {
+fn __price_create(harness: HarnessClock, args, cfg) {
   const product = __require(args, "product")
   if is_err(product) {
     return product
@@ -721,11 +743,11 @@ fn __price_create(args, cfg) {
   if args?.transfer_lookup_key != nil {
     body = body + {transfer_lookup_key: args.transfer_lookup_key}
   }
-  return __post_form(cfg, "/v1/prices", body, __idempotency_headers(args))
+  return __post_form(harness, cfg, "/v1/prices", body, __idempotency_headers(args))
 }
 
 @complexity(allow)
-fn __meter_event_create(args, cfg) {
+fn __meter_event_create(harness: HarnessClock, args, cfg) {
   const event_name = __require(args, "event_name")
   if is_err(event_name) {
     return event_name
@@ -754,11 +776,11 @@ fn __meter_event_create(args, cfg) {
     to_string(args.api_version)
   }
   const headers = __idempotency_headers(args) + {"Stripe-Version": api_version}
-  return __post_json(cfg, "/v2/billing/meter_events", body, headers)
+  return __post_json(harness, cfg, "/v2/billing/meter_events", body, headers)
 }
 
 @complexity(allow)
-fn __api_request(args, cfg) {
+fn __api_request(harness: HarnessClock, args, cfg) {
   const http_method = __upcase_method(args?.method ?? "GET")
   const path = to_string(args?.path ?? "")
   const url = __api_url(cfg.api_base_url, path)
@@ -768,25 +790,41 @@ fn __api_request(args, cfg) {
   }
   headers = headers + __idempotency_headers(args)
   if args?.body == nil {
-    return __stripe_request(http_method, url, "none", nil, cfg, headers)
+    return __stripe_request(harness, http_method, url, "none", nil, cfg, headers)
   }
   // v2 endpoints take JSON; v1 endpoints take rails-style form encoding.
   if starts_with(path, "/v2") {
-    return __stripe_request(http_method, url, "json", args.body, cfg, headers)
+    return __stripe_request(harness, http_method, url, "json", args.body, cfg, headers)
   }
-  return __stripe_request(http_method, url, "form", args.body, cfg, headers)
+  return __stripe_request(harness, http_method, url, "form", args.body, cfg, headers)
 }
 
-fn __get(cfg, path) {
-  return __stripe_request("GET", __api_url(cfg.api_base_url, path), "none", nil, cfg, {})
+fn __get(harness: HarnessClock, cfg, path) {
+  return __stripe_request(harness, "GET", __api_url(cfg.api_base_url, path), "none", nil, cfg, {})
 }
 
-fn __post_form(cfg, path, body, headers) {
-  return __stripe_request("POST", __api_url(cfg.api_base_url, path), "form", body, cfg, headers)
+fn __post_form(harness: HarnessClock, cfg, path, body, headers) {
+  return __stripe_request(
+    harness,
+    "POST",
+    __api_url(cfg.api_base_url, path),
+    "form",
+    body,
+    cfg,
+    headers,
+  )
 }
 
-fn __post_json(cfg, path, body, headers) {
-  return __stripe_request("POST", __api_url(cfg.api_base_url, path), "json", body, cfg, headers)
+fn __post_json(harness: HarnessClock, cfg, path, body, headers) {
+  return __stripe_request(
+    harness,
+    "POST",
+    __api_url(cfg.api_base_url, path),
+    "json",
+    body,
+    cfg,
+    headers,
+  )
 }
 
 fn __with_query(path, params) {
@@ -1000,7 +1038,7 @@ fn __is_disallowed_host(host_lc) {
 }
 
 @complexity(allow)
-fn __stripe_request(method, url, body_kind, body, cfg, extra_headers) {
+fn __stripe_request(harness: HarnessClock, method, url, body_kind, body, cfg, extra_headers) {
   let headers = {Accept: "application/json", Authorization: "Bearer " + cfg.api_key}
   for entry in (extra_headers ?? {}).entries() {
     headers[to_string(entry.key)] = to_string(entry.value)

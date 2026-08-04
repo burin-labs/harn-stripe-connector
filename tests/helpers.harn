@@ -38,7 +38,7 @@ pub fn signed_raw(clock: HarnessClock, secret, body, timestamp = nil) {
 }
 
 /** Build a signed raw inbound envelope from a named fixture. */
-pub fn fixture_raw(harness: Harness, name, secret, timestamp = nil) {
+pub fn fixture_raw(harness: {clock: HarnessClock, fs: HarnessFs}, name, secret, timestamp = nil) {
   return signed_raw(harness.clock, secret, fixture_body(harness.fs, name), timestamp)
 }
 

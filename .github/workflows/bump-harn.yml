@@ -1,6 +1,6 @@
 name: Bump Harn Runtime
 
-# fleet.toml in harn-bump-fleet owns the schedule and dispatches this adapter.
+# fleet.toml in harn-bump-fleet owns this generated dispatch adapter.
 on:
   workflow_dispatch:
     inputs:
@@ -14,7 +14,7 @@ permissions:
 
 jobs:
   bump:
-    uses: burin-labs/harn/.github/workflows/bump-harn.yml@88bdd139836493d3e1a11ef68856a0d8802a4066
+    uses: burin-labs/harn/.github/workflows/bump-harn.yml@d23dc77198ea45210eb3fb205031c349533d920f
     with:
       version: ${{ inputs.version }}
       validate-command: harn package verify .

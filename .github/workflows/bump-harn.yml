@@ -14,10 +14,11 @@ permissions:
 
 jobs:
   bump:
-    uses: burin-labs/harn/.github/workflows/bump-harn.yml@9c23c53d22d0bbc307ae83905bd0c0368252cd59
+    uses: burin-labs/harn/.github/workflows/bump-harn.yml@0ff3506ddecab325f100a4d7d363e88e91595902
     with:
       version: ${{ inputs.version }}
       validate-command: harn package verify .
+      publish-failure-for-repair: true
     secrets:
       app-client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
       app-private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}

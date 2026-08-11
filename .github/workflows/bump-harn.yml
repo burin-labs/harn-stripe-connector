@@ -14,7 +14,7 @@ permissions:
 
 jobs:
   bump:
-    uses: burin-labs/harn/.github/workflows/bump-harn.yml@5a34da720f3140d43a5cd4f8611941dd31a64f69
+    uses: burin-labs/harn/.github/workflows/bump-harn.yml@9c23c53d22d0bbc307ae83905bd0c0368252cd59
     with:
       version: ${{ inputs.version }}
       validate-command: harn package verify .

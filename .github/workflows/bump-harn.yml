@@ -19,6 +19,7 @@ jobs:
       version: ${{ inputs.version }}
       validate-command: harn package verify .
       publish-failure-for-repair: true
+      apply-behavior-preserving-fixes: false
     secrets:
       app-client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
       app-private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}

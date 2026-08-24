@@ -58,16 +58,16 @@ pipeline test_call_smoke(harness: Harness, task) {
     "checkout_session.create",
     common
       + {
-      allow_promotion_codes: true,
-      cancel_url: "https://x.test/c",
-      client_reference_id: "ref_1",
-      customer: "cus_1",
-      line_items: [{price: "price_1", quantity: 2}, {price: "price_metered"}],
-      metadata: {plan: "pro"},
-      mode: "subscription",
-      subscription_metadata: {team: "acme"},
-      success_url: "https://x.test/s",
-    },
+        allow_promotion_codes: true,
+        cancel_url: "https://x.test/c",
+        client_reference_id: "ref_1",
+        customer: "cus_1",
+        line_items: [{price: "price_1", quantity: 2}, {price: "price_metered"}],
+        metadata: {plan: "pro"},
+        mode: "subscription",
+        subscription_metadata: {team: "acme"},
+        success_url: "https://x.test/s",
+      },
   )
   assert_eq(session.id, "cs_1", "checkout_session.create returns id")
   assert_eq(
@@ -90,10 +90,10 @@ pipeline test_call_smoke(harness: Harness, task) {
     "checkout_session.create",
     common
       + {
-      cancel_url: "https://x.test/c",
-      line_items: [{price: "price_metered"}],
-      success_url: "https://x.test/s",
-    },
+        cancel_url: "https://x.test/c",
+        line_items: [{price: "price_metered"}],
+        success_url: "https://x.test/s",
+      },
   )
   assert_eq(
     harness.testing.http_mock_calls({include_sensitive: true})[0].body,
@@ -217,11 +217,11 @@ pipeline test_call_smoke(harness: Harness, task) {
     "meter_event.create",
     common
       + {
-      api_version: "2026-02-25.preview",
-      event_name: "api_request",
-      stripe_customer_id: "cus_1",
-      value: 1,
-    },
+        api_version: "2026-02-25.preview",
+        event_name: "api_request",
+        stripe_customer_id: "cus_1",
+        value: 1,
+      },
   )
   assert_eq(
     harness.testing.http_mock_calls({redact_sensitive: false})[0].headers["stripe-version"],
@@ -290,11 +290,11 @@ pipeline test_call_smoke(harness: Harness, task) {
     "price.create",
     common
       + {
-      currency: "usd",
-      lookup_key: "metered_api",
-      product: "prod_1",
-      recurring: {interval: "month", meter: "mtr_1", usage_type: "metered"},
-    },
+        currency: "usd",
+        lookup_key: "metered_api",
+        product: "prod_1",
+        recurring: {interval: "month", meter: "mtr_1", usage_type: "metered"},
+      },
   )
   assert_eq(
     harness.testing.http_mock_calls({include_sensitive: true})[0].body,
@@ -313,10 +313,7 @@ pipeline test_call_smoke(harness: Harness, task) {
     harness,
     "webhook_endpoint.create",
     common
-      + {
-      enabled_events: ["invoice.paid", "checkout.session.completed"],
-      url: "https://x.test/hook",
-    },
+      + {enabled_events: ["invoice.paid", "checkout.session.completed"], url: "https://x.test/hook"},
   )
   assert_eq(
     harness.testing.http_mock_calls({include_sensitive: true})[0].body,

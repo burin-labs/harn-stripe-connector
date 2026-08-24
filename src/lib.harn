@@ -104,11 +104,7 @@ pub fn payload_schema() {
 /** Initialize connector state with orchestrator context. */
 pub fn init(harness: Harness, ctx = nil) {
   const next = __state(harness.runtime)
-    + {
-    initialized: true,
-    initialized_at_ms: harness.clock.now_ms(),
-    ctx: ctx ?? {},
-  }
+    + {initialized: true, initialized_at_ms: harness.clock.now_ms(), ctx: ctx ?? {}}
   __set_state(harness.runtime, next)
   return next
 }
@@ -133,11 +129,7 @@ pub fn activate(harness: Harness, bindings = []) {
     by_id[binding_id] = binding + {binding_id: binding_id}
   }
   const next = __state(harness.runtime)
-    + {
-    active: true,
-    activated_at_ms: harness.clock.now_ms(),
-    bindings: by_id,
-  }
+    + {active: true, activated_at_ms: harness.clock.now_ms(), bindings: by_id}
   __set_state(harness.runtime, next)
   return {bindings: len(by_id.keys()), kind: "webhook", provider: STRIPE_PROVIDER_ID}
 }
@@ -209,12 +201,7 @@ pub fn call(harness: Harness, method, args = {}) {
 
 fn __state(runtime: HarnessRuntime) {
   return runtime.store_get(STRIPE_STATE_KEY)
-    ?? {
-    active: false,
-    bindings: {},
-    ctx: {},
-    initialized: false,
-  }
+    ?? {active: false, bindings: {}, ctx: {}, initialized: false}
 }
 
 fn __set_state(runtime: HarnessRuntime, state) {
@@ -242,7 +229,7 @@ fn __reject_err(err) {
   const message = err?.message ?? "request rejected"
   const status = if code == "invalid_signature" || code == "missing_signature"
     || code
-    == "missing_secret"
+      == "missing_secret"
     || code == "stale_signature" {
     401
   } else {
@@ -891,10 +878,7 @@ fn __outbound_config(
   }
   const env_key = env.get("STRIPE_API_KEY") ?? env.get("STRIPE_SECRET_KEY")
   const api_key = args?.api_key ?? args?.secret ?? args?.secrets?.api_key ?? env_key
-    ?? __resolve_secret(
-    secrets,
-    "stripe/api-key",
-  )
+    ?? __resolve_secret(secrets, "stripe/api-key")
   if api_key == nil || trim(to_string(api_key)) == "" {
     return __err("missing_key", "stripe connector requires api_key (Bearer) for outbound calls")
   }
@@ -990,10 +974,7 @@ fn __is_disallowed_host(host_lc) {
     return true
   }
   if ends_with(host_lc, ".localhost") || ends_with(host_lc, ".local")
-    || ends_with(
-    host_lc,
-    ".internal",
-  ) {
+    || ends_with(host_lc, ".internal") {
     return true
   }
   if host_lc == "::1" || host_lc == "0:0:0:0:0:0:0:1" {

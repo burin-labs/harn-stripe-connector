@@ -14,9 +14,9 @@ permissions:
 
 jobs:
   bump:
-    uses: burin-labs/harn/.github/workflows/bump-harn.yml@c36864b5f72c529de336bca2c479caf10bab9540
+    uses: burin-labs/harn/.github/workflows/bump-harn.yml@7e0a344667808499d9460ae95e973f7b9854c01b
     with:
-      orchestration-sha: c36864b5f72c529de336bca2c479caf10bab9540
+      orchestration-sha: 7e0a344667808499d9460ae95e973f7b9854c01b
       version: ${{ inputs.version }}
       validate-command: harn package verify .
       publish-failure-for-repair: true

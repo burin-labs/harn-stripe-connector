@@ -10,7 +10,7 @@ import {
 } from "./helpers"
 
 @complexity(allow)
-pipeline test_normalize_events(harness: Harness, task) {
+pipeline test_normalize_events(harness: Harness, task: any) {
   const secret = "whsec_test"
   assert_stripe_interface(harness)
   shutdown(harness)

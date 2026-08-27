@@ -7,7 +7,7 @@ type MeterEventBody = {
 }
 
 @complexity(allow)
-pipeline test_call_smoke(harness: Harness, task) {
+pipeline test_call_smoke(harness: Harness, task: any) {
   harness.testing.http_mock_clear()
   const base = "https://stripe-api.test"
   const key = "sk_test_123"

@@ -5,7 +5,7 @@ import { call } from "../src/lib"
 // records the encoded request body, so these are true encoder assertions rather
 // than a re-implementation.
 @complexity(allow)
-pipeline test_form_encode(harness: Harness, task) {
+pipeline test_form_encode(harness: Harness, task: any) {
   harness.testing.http_mock_clear()
   const base = "https://stripe-api.test"
   const key = "sk_test_123"

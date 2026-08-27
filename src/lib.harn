@@ -102,7 +102,7 @@ pub fn payload_schema() {
 }
 
 /** Initialize connector state with orchestrator context. */
-pub fn init(harness: Harness, ctx = nil) {
+pub fn init(harness: Harness, ctx: any = nil) {
   const next = __state(harness.runtime)
     + {initialized: true, initialized_at_ms: harness.clock.now_ms(), ctx: ctx ?? {}}
   __set_state(harness.runtime, next)
@@ -110,7 +110,7 @@ pub fn init(harness: Harness, ctx = nil) {
 }
 
 /** Activate webhook bindings and reject duplicate configured paths. */
-pub fn activate(harness: Harness, bindings = []) {
+pub fn activate(harness: Harness, bindings: any = []) {
   let by_id = {}
   let seen_paths = {}
   for binding in bindings ?? [] {
@@ -152,7 +152,7 @@ pub fn shutdown(harness: Harness) {
  *
  * Fails closed when no webhook signing secret is configured.
  */
-pub fn normalize_inbound(harness: Harness, raw) {
+pub fn normalize_inbound(harness: Harness, raw: any) {
   const body_text = raw?.body_text ?? raw?.body ?? ""
   if len(body_text) > MAX_BODY_BYTES {
     return __reject(413, "payload_too_large", "stripe webhook body exceeds 1 MiB cap")
@@ -179,7 +179,7 @@ pub fn normalize_inbound(harness: Harness, raw) {
 
 @complexity(allow)
 /** Dispatch a supported Stripe REST method. */
-pub fn call(harness: Harness, method, args = {}) {
+pub fn call(harness: Harness, method: any, args: any = {}) {
   if !contains(STRIPE_OUTBOUND_METHODS, method) {
     return __err(
       "method_not_found",
@@ -204,16 +204,16 @@ fn __state(runtime: HarnessRuntime) {
     ?? {active: false, bindings: {}, ctx: {}, initialized: false}
 }
 
-fn __set_state(runtime: HarnessRuntime, state) {
+fn __set_state(runtime: HarnessRuntime, state: any) {
   runtime.store_set(STRIPE_STATE_KEY, state)
   return state
 }
 
-fn __err(code, message) {
+fn __err(code: any, message: any) {
   return Err({code: code, message: message})
 }
 
-fn __reject(status, code, message) {
+fn __reject(status: any, code: any, message: any) {
   return {
     type: "reject",
     reject: {
@@ -224,7 +224,7 @@ fn __reject(status, code, message) {
   }
 }
 
-fn __reject_err(err) {
+fn __reject_err(err: any) {
   const code = err?.code ?? "rejected"
   const message = err?.message ?? "request rejected"
   const status = if code == "invalid_signature" || code == "missing_signature"
@@ -238,7 +238,7 @@ fn __reject_err(err) {
   return __reject(status, code, message)
 }
 
-fn __header(headers, name) {
+fn __header(headers: any, name: any) {
   const wanted = lowercase(name)
   for entry in (headers ?? {}).entries() {
     if lowercase(trim(to_string(entry.key))) == wanted {
@@ -249,7 +249,7 @@ fn __header(headers, name) {
 }
 
 /** Return the first candidate that is non-nil and non-blank as a string. */
-fn __first_nonempty(candidates) {
+fn __first_nonempty(candidates: any) {
   for candidate in candidates {
     if candidate != nil && trim(to_string(candidate)) != "" {
       return to_string(candidate)
@@ -259,7 +259,7 @@ fn __first_nonempty(candidates) {
 }
 
 /** Read a secret id, returning nil when it resolves to an empty/absent value. */
-fn __resolve_secret(secrets: HarnessSecrets, secret_id) {
+fn __resolve_secret(secrets: HarnessSecrets, secret_id: any) {
   const resolved = try {
     secrets.read(secret_id)
   }
@@ -273,7 +273,7 @@ fn __resolve_secret(secrets: HarnessSecrets, secret_id) {
   return value
 }
 
-fn __binding(runtime: HarnessRuntime, raw) {
+fn __binding(runtime: HarnessRuntime, raw: any) {
   const binding_id = raw?.metadata?.binding_id ?? raw?.binding_id
   if binding_id == nil {
     return nil
@@ -281,7 +281,7 @@ fn __binding(runtime: HarnessRuntime, raw) {
   return (__state(runtime).bindings ?? {}).get(binding_id)
 }
 
-fn __webhook_secret(runtime: HarnessRuntime, secrets: HarnessSecrets, raw) {
+fn __webhook_secret(runtime: HarnessRuntime, secrets: HarnessSecrets, raw: any) {
   const state = __state(runtime)
   const binding = __binding(runtime, raw)
   const inline = __first_nonempty(
@@ -299,7 +299,7 @@ fn __webhook_secret(runtime: HarnessRuntime, secrets: HarnessSecrets, raw) {
   return __resolve_secret(secrets, __webhook_secret_id(runtime, raw) ?? STRIPE_WEBHOOK_SECRET_ID)
 }
 
-fn __webhook_secret_id(runtime: HarnessRuntime, raw) {
+fn __webhook_secret_id(runtime: HarnessRuntime, raw: any) {
   const metadata = raw?.metadata ?? {}
   const binding = __binding(runtime, raw)
   return __first_nonempty(
@@ -313,7 +313,7 @@ fn __webhook_secret_id(runtime: HarnessRuntime, raw) {
   )
 }
 
-fn __verify_webhook(harness: Harness, raw, headers, body_text) {
+fn __verify_webhook(harness: Harness, raw: any, headers: any, body_text: any) {
   const secret = __webhook_secret(harness.runtime, harness.secrets, raw)
   if secret == nil || trim(to_string(secret)) == "" {
     return __err(
@@ -329,7 +329,13 @@ fn __verify_webhook(harness: Harness, raw, headers, body_text) {
 }
 
 @complexity(allow)
-fn __verify_signature(clock: HarnessClock, raw, signature_header, body_text, secret) {
+fn __verify_signature(
+  clock: HarnessClock,
+  raw: any,
+  signature_header: any,
+  body_text: any,
+  secret: any,
+) {
   const fields = __parse_signature_header(signature_header)
   const timestamp = fields.t
   const signatures = fields.v1
@@ -368,7 +374,7 @@ fn __verify_signature(clock: HarnessClock, raw, signature_header, body_text, sec
   return Ok("signed")
 }
 
-fn __verification_timestamp(clock: HarnessClock, raw) {
+fn __verification_timestamp(clock: HarnessClock, raw: any) {
   const received_at = raw?.received_at
   if received_at != nil && trim(to_string(received_at)) != "" {
     const parsed = try {
@@ -382,7 +388,7 @@ fn __verification_timestamp(clock: HarnessClock, raw) {
 }
 
 @complexity(allow)
-fn __parse_signature_header(header) {
+fn __parse_signature_header(header: any) {
   let t = nil
   let v1 = []
   for part in split(to_string(header), ",") {
@@ -402,7 +408,7 @@ fn __parse_signature_header(header) {
 }
 
 @complexity(allow)
-fn __build_event(event_type, payload, raw, headers) {
+fn __build_event(event_type: any, payload: any, raw: any, headers: any) {
   const _ = headers
   const data_object = payload?.data?.object ?? {}
   const event_id = payload?.id
@@ -427,7 +433,7 @@ fn __build_event(event_type, payload, raw, headers) {
   }
 }
 
-fn __event_kind(event_type) {
+fn __event_kind(event_type: any) {
   if event_type == "checkout.session.completed" {
     return "checkout.completed"
   }
@@ -445,7 +451,7 @@ fn __event_kind(event_type) {
   return "event"
 }
 
-fn __customer_id(data_object) {
+fn __customer_id(data_object: any) {
   const customer = data_object?.customer
   if type_of(customer) == "dict" {
     return customer?.id
@@ -453,7 +459,7 @@ fn __customer_id(data_object) {
   return customer
 }
 
-fn __subscription_id(event_type, data_object) {
+fn __subscription_id(event_type: any, data_object: any) {
   if starts_with(event_type, STRIPE_SUBSCRIPTION_PREFIX) {
     return data_object?.id
   }
@@ -464,11 +470,11 @@ fn __subscription_id(event_type, data_object) {
   return sub
 }
 
-fn __dedupe_key(event_id) {
+fn __dedupe_key(event_id: any) {
   return "stripe:" + to_string(event_id ?? "unknown")
 }
 
-fn __require(args, key) {
+fn __require(args: any, key: any) {
   const value = args.get(key)
   if value == nil || trim(to_string(value)) == "" {
     return __err("missing_argument", "stripe call requires `" + key + "`")
@@ -476,7 +482,7 @@ fn __require(args, key) {
   return Ok(to_string(value))
 }
 
-fn __idempotency_headers(args) {
+fn __idempotency_headers(args: any) {
   const key = args?.idempotency_key
   if key != nil && trim(to_string(key)) != "" {
     return {"Idempotency-Key": to_string(key)}
@@ -485,7 +491,7 @@ fn __idempotency_headers(args) {
 }
 
 @complexity(allow)
-fn __dispatch(clock: HarnessClock, method, args, cfg) {
+fn __dispatch(clock: HarnessClock, method: any, args: any, cfg: any) {
   if method == "api.request" {
     return __api_request(clock, args, cfg)
   }
@@ -646,7 +652,7 @@ fn __dispatch(clock: HarnessClock, method, args, cfg) {
 }
 
 @complexity(allow)
-fn __checkout_session_create(clock: HarnessClock, args, cfg) {
+fn __checkout_session_create(clock: HarnessClock, args: any, cfg: any) {
   const success_url = __require(args, "success_url")
   if is_err(success_url) {
     return success_url
@@ -679,7 +685,7 @@ fn __checkout_session_create(clock: HarnessClock, args, cfg) {
   return __post_form(clock, cfg, "/v1/checkout/sessions", body, __idempotency_headers(args))
 }
 
-fn __subscription_cancel(clock: HarnessClock, args, cfg) {
+fn __subscription_cancel(clock: HarnessClock, args: any, cfg: any) {
   const id = __require(args, "id")
   if is_err(id) {
     return id
@@ -694,7 +700,7 @@ fn __subscription_cancel(clock: HarnessClock, args, cfg) {
 }
 
 @complexity(allow)
-fn __price_create(clock: HarnessClock, args, cfg) {
+fn __price_create(clock: HarnessClock, args: any, cfg: any) {
   const product = __require(args, "product")
   if is_err(product) {
     return product
@@ -720,7 +726,7 @@ fn __price_create(clock: HarnessClock, args, cfg) {
 }
 
 @complexity(allow)
-fn __meter_event_create(clock: HarnessClock, args, cfg) {
+fn __meter_event_create(clock: HarnessClock, args: any, cfg: any) {
   const event_name = __require(args, "event_name")
   if is_err(event_name) {
     return event_name
@@ -753,7 +759,7 @@ fn __meter_event_create(clock: HarnessClock, args, cfg) {
 }
 
 @complexity(allow)
-fn __api_request(clock: HarnessClock, args, cfg) {
+fn __api_request(clock: HarnessClock, args: any, cfg: any) {
   const http_method = __upcase_method(args?.method ?? "GET")
   const path = to_string(args?.path ?? "")
   const url = __api_url(cfg.api_base_url, path)
@@ -772,11 +778,11 @@ fn __api_request(clock: HarnessClock, args, cfg) {
   return __stripe_request(clock, http_method, url, "form", args.body, cfg, headers)
 }
 
-fn __get(clock: HarnessClock, cfg, path) {
+fn __get(clock: HarnessClock, cfg: any, path: any) {
   return __stripe_request(clock, "GET", __api_url(cfg.api_base_url, path), "none", nil, cfg, {})
 }
 
-fn __post_form(clock: HarnessClock, cfg, path, body, headers) {
+fn __post_form(clock: HarnessClock, cfg: any, path: any, body: any, headers: any) {
   return __stripe_request(
     clock,
     "POST",
@@ -788,7 +794,7 @@ fn __post_form(clock: HarnessClock, cfg, path, body, headers) {
   )
 }
 
-fn __post_json(clock: HarnessClock, cfg, path, body, headers) {
+fn __post_json(clock: HarnessClock, cfg: any, path: any, body: any, headers: any) {
   return __stripe_request(
     clock,
     "POST",
@@ -800,7 +806,7 @@ fn __post_json(clock: HarnessClock, cfg, path, body, headers) {
   )
 }
 
-fn __with_query(path, params) {
+fn __with_query(path: any, params: any) {
   const encoded = __form_encode(params ?? {})
   if encoded == "" {
     return path
@@ -808,12 +814,12 @@ fn __with_query(path, params) {
   return path + "?" + encoded
 }
 
-fn __form_encode(data) {
+fn __form_encode(data: any) {
   return join(__form_pairs("", data), "&")
 }
 
 @complexity(allow)
-fn __form_pairs(prefix, value) {
+fn __form_pairs(prefix: any, value: any) {
   // nil fields are omitted entirely so callers can pass optional args straight
   // through without pre-filtering.
   if value == nil {
@@ -847,7 +853,7 @@ fn __form_pairs(prefix, value) {
   return [prefix + "=" + __form_scalar(value)]
 }
 
-fn __form_scalar(value) {
+fn __form_scalar(value: any) {
   if type_of(value) == "bool" {
     return if value {
       "true"
@@ -858,7 +864,7 @@ fn __form_scalar(value) {
   return url_encode(to_string(value))
 }
 
-fn __upcase_method(method) {
+fn __upcase_method(method: any) {
   return uppercase(trim(to_string(method)))
 }
 
@@ -868,7 +874,7 @@ fn __outbound_config(
   secrets: HarnessSecrets,
   net: HarnessNet,
   clock: HarnessClock,
-  args,
+  args: any,
 ) {
   const env_base = env.get_or("STRIPE_API_BASE_URL", STRIPE_API_BASE_URL)
   const api_base_url = args?.api_base_url ?? env_base
@@ -890,7 +896,7 @@ fn __outbound_config(
   return Ok(config)
 }
 
-fn __api_url(api_base_url, path) {
+fn __api_url(api_base_url: any, path: any) {
   const base = trim(to_string(api_base_url))
   const prefix = if ends_with(base, "/") {
     base[0:len(base) - 1]
@@ -907,7 +913,7 @@ fn __api_url(api_base_url, path) {
 }
 
 @complexity(allow)
-fn __validate_url_host(url_value, label) {
+fn __validate_url_host(url_value: any, label: any) {
   if url_value == nil || trim(to_string(url_value)) == "" {
     return __err("invalid_url", label + " is required")
   }
@@ -937,7 +943,7 @@ fn __validate_url_host(url_value, label) {
   return Ok(true)
 }
 
-fn __strip_port(host_port) {
+fn __strip_port(host_port: any) {
   if starts_with(host_port, "[") {
     const close = __index_of(host_port, "]")
     if close >= 0 {
@@ -952,7 +958,7 @@ fn __strip_port(host_port) {
   return host_port
 }
 
-fn __index_of(text, needle) {
+fn __index_of(text: any, needle: any) {
   const n = len(text)
   const m = len(needle)
   if m == 0 {
@@ -969,7 +975,7 @@ fn __index_of(text, needle) {
 }
 
 @complexity(allow)
-fn __is_disallowed_host(host_lc) {
+fn __is_disallowed_host(host_lc: any) {
   if host_lc == "localhost" {
     return true
   }
@@ -1005,7 +1011,15 @@ fn __is_disallowed_host(host_lc) {
 }
 
 @complexity(allow)
-fn __stripe_request(clock: HarnessClock, method, url, body_kind, body, cfg, extra_headers) {
+fn __stripe_request(
+  clock: HarnessClock,
+  method: any,
+  url: any,
+  body_kind: any,
+  body: any,
+  cfg: any,
+  extra_headers: any,
+) {
   let headers = {Accept: "application/json", Authorization: "Bearer " + cfg.api_key}
   for entry in (extra_headers ?? {}).entries() {
     headers[to_string(entry.key)] = to_string(entry.value)
@@ -1050,7 +1064,7 @@ fn __stripe_request(clock: HarnessClock, method, url, body_kind, body, cfg, extr
   }
 }
 
-fn __sleep_for_retry(clock: HarnessClock, response) {
+fn __sleep_for_retry(clock: HarnessClock, response: any) {
   const retry_after = __header(response.headers ?? {}, "retry-after")
   if retry_after == nil || trim(to_string(retry_after)) == "" {
     return nil
@@ -1068,7 +1082,7 @@ fn __sleep_for_retry(clock: HarnessClock, response) {
   return nil
 }
 
-fn __decode_response(response) {
+fn __decode_response(response: any) {
   if trim(response.body ?? "") == "" {
     return {body: "", headers: response.headers, status: response.status}
   }

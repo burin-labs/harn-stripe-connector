@@ -11,7 +11,7 @@ import {
 } from "../src/lib"
 
 /** Read a fixture JSON body from the test fixtures directory. */
-pub fn fixture_body(fs: HarnessFs, name) -> string {
+pub fn fixture_body(fs: HarnessFs, name: any) -> string {
   return fs.read_text(fs.source_dir() + "/fixtures/webhooks/" + name + ".json")
 }
 
@@ -21,7 +21,7 @@ pub fn fixture_body(fs: HarnessFs, name) -> string {
  * The signed message is `"<timestamp>.<raw_body>"`, HMAC-SHA256 keyed by the
  * endpoint signing secret. Mirrors `__verify_signature` in src/lib.harn.
  */
-pub fn sign(secret, body, timestamp) -> string {
+pub fn sign(secret: any, body: any, timestamp: any) -> string {
   const v1 = hmac_sha256(to_string(secret), to_string(timestamp) + "." + body)
   return "t=" + to_string(timestamp) + ",v1=" + v1
 }
@@ -32,13 +32,18 @@ pub fn now_ts(clock: HarnessClock) -> int {
 }
 
 /** Build a raw inbound envelope signed with the Stripe-Signature scheme. */
-pub fn signed_raw(clock: HarnessClock, secret, body, timestamp = nil) {
+pub fn signed_raw(clock: HarnessClock, secret: any, body: any, timestamp: any = nil) {
   const ts = timestamp ?? now_ts(clock)
   return {body_text: body, headers: {"stripe-signature": sign(secret, body, ts)}}
 }
 
 /** Build a signed raw inbound envelope from a named fixture. */
-pub fn fixture_raw(harness: {clock: HarnessClock, fs: HarnessFs}, name, secret, timestamp = nil) {
+pub fn fixture_raw(
+  harness: {clock: HarnessClock, fs: HarnessFs},
+  name: any,
+  secret: any,
+  timestamp: any = nil,
+) {
   return signed_raw(harness.clock, secret, fixture_body(harness.fs, name), timestamp)
 }
 
@@ -62,7 +67,7 @@ pub fn assert_stripe_interface(harness: Harness) {
   require activated.bindings == 1, "activate counts bindings"
 }
 
-fn __method_meta(method_list, name) {
+fn __method_meta(method_list: any, name: any) {
   for entry in method_list {
     if entry.name == name {
       return entry
@@ -71,10 +76,10 @@ fn __method_meta(method_list, name) {
   return {name: name, requires_approval: false}
 }
 
-pub fn stripe_call(harness: Harness, method, args) {
+pub fn stripe_call(harness: Harness, method: any, args: any) {
   return call(harness, method, args)
 }
 
-pub fn stripe_normalize(harness: Harness, raw) {
+pub fn stripe_normalize(harness: Harness, raw: any) {
   return normalize_inbound(harness, raw)
 }

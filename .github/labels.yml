@@ -1,0 +1,67 @@
+# Label taxonomy for this repository.
+#
+# The priority, status, and effort categories are copied unchanged from the
+# canonical org taxonomy in burin-labs/.github `.github/labels.yml`. Only the
+# `area/*` category is repository-specific.
+#
+# Rules:
+#   - Additive only. Never delete a label this repository already has. Rename
+#     an equivalent label under an old name (`area:foo` -> `area/foo`) so every
+#     issue and pull request stays attached to it.
+#   - There is no `type/*` prefix. GitHub's defaults (bug, enhancement,
+#     documentation, duplicate, question, wontfix) already carry type.
+
+priority:
+  - name: priority/p0
+    color: "b60205"
+    description: Must have, ships before anything else in flight
+  - name: priority/p1
+    color: "d93f0b"
+    description: High priority
+  - name: priority/p2
+    color: "fbca04"
+    description: Medium priority
+  - name: priority/p3
+    color: "0e8a16"
+    description: Lower priority
+
+status:
+  - name: status/blocked
+    color: "d93f0b"
+    description: Cannot proceed until a named dependency clears
+  - name: status/in-progress
+    color: "0e8a16"
+    description: An agent or engineer is actively working this
+  - name: status/needs-decision
+    color: "fbca04"
+    description: Needs a founder or code-owner ruling before work continues
+  - name: status/ready
+    color: "0e8a16"
+    description: Scoped and unblocked, ready to pick up
+
+effort:
+  - name: effort/small
+    color: "c2e0c6"
+    description: Hours
+  - name: effort/medium
+    color: "fbca04"
+    description: A day or two
+  - name: effort/large
+    color: "d93f0b"
+    description: Multi-day or multi-PR
+
+area:
+  - name: area/connector
+    color: "1d76db"
+    description: Stripe connector source, contract, and fixtures
+
+reused-unprefixed:
+  # Reuse these for type instead of inventing a `type/*` prefix.
+  - bug
+  - enhancement
+  - documentation
+  - duplicate
+  - question
+  - wontfix
+  - good first issue
+  - help wanted

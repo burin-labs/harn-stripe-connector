@@ -7,7 +7,7 @@ import {
   sign,
   signed_raw,
   stripe_normalize,
-} from "./helpers"
+} from "../testdata/helpers"
 
 @complexity(allow)
 pipeline test_normalize_events(harness: Harness, task: any) {

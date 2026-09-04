@@ -12,7 +12,7 @@ import {
 
 /** Read a fixture JSON body from the test fixtures directory. */
 pub fn fixture_body(fs: HarnessFs, name: any) -> string {
-  return fs.read_text(fs.source_dir() + "/fixtures/webhooks/" + name + ".json")
+  return fs.read_text(fs.source_dir() + "/../tests/fixtures/webhooks/" + name + ".json")
 }
 
 /**

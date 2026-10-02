@@ -18,7 +18,7 @@ jobs:
     name: CI status
     if: ${{ always() }}
     needs: [harn]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Enforce required jobs
         uses: burin-labs/.github/.github/actions/require-successful-needs@546968aa9c3c08be94df6730f7e504fbfbe94450

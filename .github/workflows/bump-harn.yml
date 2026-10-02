@@ -2,6 +2,11 @@ name: Bump Harn Runtime
 
 # fleet.toml in harn-bump-fleet owns this generated dispatch adapter.
 on:
+  push:
+    branches:
+      - "main"
+    paths:
+      - ".github/workflows/bump-harn.yml"
   workflow_dispatch:
     inputs:
       version:
@@ -14,6 +19,7 @@ permissions:
 
 jobs:
   bump:
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     uses: burin-labs/harn/.github/workflows/bump-harn.yml@f7ddcbefb215ef520651830f76bf266e20568ba5
     with:
       orchestration-sha: f7ddcbefb215ef520651830f76bf266e20568ba5

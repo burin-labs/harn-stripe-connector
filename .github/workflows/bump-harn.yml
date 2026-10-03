@@ -20,9 +20,9 @@ permissions:
 jobs:
   bump:
     if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
-    uses: burin-labs/harn/.github/workflows/bump-harn.yml@3d76cce270d45055d9b288a141c9da8607ae79ad
+    uses: burin-labs/harn/.github/workflows/bump-harn.yml@6d2ccc3bd47d7e3a10a261bae46b402266176471
     with:
-      orchestration-sha: 3d76cce270d45055d9b288a141c9da8607ae79ad
+      orchestration-sha: 6d2ccc3bd47d7e3a10a261bae46b402266176471
       version: ${{ inputs.version }}
       validate-command: harn package verify .
       publish-failure-for-repair: true

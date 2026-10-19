@@ -400,7 +400,7 @@ fn __parse_signature_header(header: any) {
       if key == "t" {
         t = value
       } else if key == "v1" {
-        v1 = v1.push(value)
+        v1.push(value)
       }
     }
   }

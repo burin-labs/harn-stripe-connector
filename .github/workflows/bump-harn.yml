@@ -20,14 +20,15 @@ permissions:
 jobs:
   bump:
     if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
-    uses: burin-labs/harn/.github/workflows/bump-harn.yml@fb7275fa91979fd332edfcc7fdd5e70ce3026c2d
+    uses: burin-labs/harn/.github/workflows/bump-harn.yml@6b541c0b50fb9c5dfab994ecb118ee1ea6004b44
     with:
-      orchestration-sha: fb7275fa91979fd332edfcc7fdd5e70ce3026c2d
+      orchestration-sha: 6b541c0b50fb9c5dfab994ecb118ee1ea6004b44
       version: ${{ inputs.version }}
       validate-command: harn package verify .
       publish-failure-for-repair: true
       apply-behavior-preserving-fixes: true
       behavior-preserving-fix-exclude-codes: "HARN-LNT-051"
+      enable-auto-merge: false
     secrets:
       app-client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
       app-private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}

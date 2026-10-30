@@ -1,0 +1,32 @@
+name: Smart Ship
+
+# fleet.toml in harn-bump-fleet owns this generated Smart Ship caller.
+on:
+  pull_request_target:
+    types: [labeled, unlabeled, synchronize, ready_for_review, dequeued, closed]
+  pull_request_review:
+    types: [submitted]
+  workflow_run:
+    workflows:
+      - "CI"
+    types: [completed]
+  schedule:
+    - cron: "7,37 * * * *"
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: Pull request number to look at; empty runs a sweep.
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  ship:
+    uses: burin-labs/.github/.github/workflows/smart-ship.yml@3be52bec8cebbe67ce99853769b3d91d33c70ac3
+    with:
+      repair: false
+    secrets:
+      RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+      RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}

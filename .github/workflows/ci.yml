@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   harn:
-    uses: burin-labs/.github/.github/workflows/harn-package.yml@d77cdcf02cb2215982ea668582f53a73821ee90d
+    uses: burin-labs/.github/.github/workflows/harn-package.yml@2ef969f35ae0384e786be20d9eb2467edc88e8bd
 
   ci-status:
     name: CI status
@@ -21,6 +21,6 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Enforce required jobs
-        uses: burin-labs/.github/.github/actions/require-successful-needs@d77cdcf02cb2215982ea668582f53a73821ee90d
+        uses: burin-labs/.github/.github/actions/require-successful-needs@2ef969f35ae0384e786be20d9eb2467edc88e8bd
         with:
           results-json: ${{ toJSON(needs.*.result) }}

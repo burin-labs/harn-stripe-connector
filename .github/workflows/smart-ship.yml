@@ -24,7 +24,7 @@ permissions:
 
 jobs:
   ship:
-    uses: burin-labs/.github/.github/workflows/smart-ship.yml@3be52bec8cebbe67ce99853769b3d91d33c70ac3
+    uses: burin-labs/.github/.github/workflows/smart-ship.yml@7e287a6cfa82db8fd7c253120b2f13dcce34b2b9
     with:
       repair: false
     secrets:

@@ -12,7 +12,7 @@ pipeline test_header_normalization_preserves_first_match_and_signed_webhooks(har
       { entry -> [" " + uppercase(entry.key) + " ", " " + entry.value + " "] },
     ),
   )
-  const collisions = aliases + raw.headers.map_values({ value -> "wrong" })
+  const collisions = aliases + raw.headers.map_values({ _value -> "wrong" })
   for headers in [aliases, collisions] {
     const accepted = normalize_inbound(harness, raw + {headers: headers})
     assert_eq(accepted.type, "event")

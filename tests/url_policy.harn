@@ -1,0 +1,29 @@
+import { call } from "../src/lib"
+
+pipeline test_shared_url_policy_reaches_public_calls_and_refuses_private_hosts(harness: Harness) {
+  const args = {api_key: "fixture-token", id: "probe"}
+  const base = "https://connector-policy.test"
+  harness.testing.http_mock_clear()
+  harness.testing.http_mock(
+    "GET",
+    "${base}/v1/customers/probe",
+    {status: 200, body: "{\"policy_witness\":true}"},
+  )
+  const accepted = call(harness, "customer.get", args + {api_base_url: base})
+  assert_eq(accepted.policy_witness, true)
+  assert_eq(len(harness.testing.http_mock_calls()), 1)
+  harness.testing.http_mock_clear()
+  for blocked in [
+    "https://localhost",
+    "https://2130706433",
+    "https://0.1.2.3",
+    "https://100.64.0.1",
+    "https://[::ffff:127.0.0.1]",
+    "https://service.internal",
+  ] {
+    const refused = call(harness, "customer.get", args + {api_base_url: blocked})
+    assert(is_err(refused), blocked)
+    assert_eq(unwrap_err(refused).code, "invalid_url")
+  }
+  assert_eq(len(harness.testing.http_mock_calls()), 0)
+}

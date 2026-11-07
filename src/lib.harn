@@ -1,3 +1,5 @@
+import { connector_http_validate_url_host } from "std/connectors/http"
+
 const STRIPE_PROVIDER_ID = "stripe"
 
 const STRIPE_STATE_KEY = "harn-stripe-connector.state"
@@ -393,7 +395,7 @@ fn __parse_signature_header(header: any) {
   let v1 = []
   for part in split(to_string(header), ",") {
     const trimmed = trim(part)
-    const eq = __index_of(trimmed, "=")
+    const eq = trimmed.index_of("=")
     if eq > 0 {
       const key = lowercase(trim(trimmed[0:eq]))
       const value = trim(trimmed[eq + 1:len(trimmed)])
@@ -912,102 +914,12 @@ fn __api_url(api_base_url: any, path: any) {
   return prefix + "/" + path
 }
 
-@complexity(allow)
-fn __validate_url_host(url_value: any, label: any) {
-  if url_value == nil || trim(to_string(url_value)) == "" {
-    return __err("invalid_url", label + " is required")
-  }
-  const url = trim(to_string(url_value))
-  if !starts_with(lowercase(url), "https://") {
-    return __err("invalid_url", label + " must use https:// scheme")
-  }
-  const after_scheme = url[8:len(url)]
-  const slash_idx = __index_of(after_scheme, "/")
-  const host_port = if slash_idx >= 0 {
-    after_scheme[0:slash_idx]
-  } else {
-    after_scheme
-  }
-  const host = __strip_port(host_port)
-  if host == "" {
-    return __err("invalid_url", label + " is missing a host")
-  }
-  const host_lc = lowercase(host)
-  if __is_disallowed_host(host_lc) {
-    return __err(
-      "invalid_url",
-      label + " host `" + host
-        + "` is not allowed (loopback/private/link-local/.internal/.local are blocked)",
-    )
+fn __validate_url_host(url_value: any, label: string) {
+  const checked = connector_http_validate_url_host(url_value, label)
+  if is_err(checked) {
+    return __err("invalid_url", unwrap_err(checked))
   }
   return Ok(true)
-}
-
-fn __strip_port(host_port: any) {
-  if starts_with(host_port, "[") {
-    const close = __index_of(host_port, "]")
-    if close >= 0 {
-      return host_port[1:close]
-    }
-    return host_port
-  }
-  const colon = __index_of(host_port, ":")
-  if colon >= 0 {
-    return host_port[0:colon]
-  }
-  return host_port
-}
-
-fn __index_of(text: any, needle: any) {
-  const n = len(text)
-  const m = len(needle)
-  if m == 0 {
-    return 0
-  }
-  let i = 0
-  while i + m <= n {
-    if text[i:i + m] == needle {
-      return i
-    }
-    i = i + 1
-  }
-  return -1
-}
-
-@complexity(allow)
-fn __is_disallowed_host(host_lc: any) {
-  if host_lc == "localhost" {
-    return true
-  }
-  if ends_with(host_lc, ".localhost") || ends_with(host_lc, ".local")
-    || ends_with(host_lc, ".internal") {
-    return true
-  }
-  if host_lc == "::1" || host_lc == "0:0:0:0:0:0:0:1" {
-    return true
-  }
-  if starts_with(host_lc, "127.") || starts_with(host_lc, "10.")
-    || starts_with(host_lc, "169.254.")
-    || starts_with(host_lc, "192.168.") {
-    return true
-  }
-  if starts_with(host_lc, "172.") {
-    const rest = host_lc[4:len(host_lc)]
-    const dot = __index_of(rest, ".")
-    if dot > 0 {
-      const octet_str = rest[0:dot]
-      const parsed = try {
-        to_int(octet_str)
-      }
-      if !is_err(parsed) {
-        const octet = unwrap(parsed)
-        if octet >= 16 && octet <= 31 {
-          return true
-        }
-      }
-    }
-  }
-  return false
 }
 
 @complexity(allow)

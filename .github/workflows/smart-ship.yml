@@ -30,3 +30,14 @@ jobs:
     secrets:
       RELEASE_APP_CLIENT_ID: ${{ secrets.RELEASE_APP_CLIENT_ID }}
       RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+  approve:
+    # Approves only the release bot's runtime bumps and projection restores that
+    # the pinned path policy allows; see approve-fleet-pr.yml in harn-bump-fleet.
+    permissions:
+      contents: read
+      pull-requests: write
+      checks: read
+    uses: burin-labs/harn-bump-fleet/.github/workflows/approve-fleet-pr.yml@db843be9b5e0c3b89f00270cce12f92dc938405b
+    with:
+      source_ref: db843be9b5e0c3b89f00270cce12f92dc938405b
+      pull_request: ${{ github.event.pull_request.number || '' }}

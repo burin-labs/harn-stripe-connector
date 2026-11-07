@@ -1,4 +1,4 @@
-import { connector_http_validate_url_host } from "std/connectors/http"
+import { connector_http_header, connector_http_validate_url_host } from "std/connectors/http"
 
 const STRIPE_PROVIDER_ID = "stripe"
 
@@ -241,13 +241,11 @@ fn __reject_err(err: any) {
 }
 
 fn __header(headers: any, name: any) {
-  const wanted = lowercase(name)
-  for entry in (headers ?? {}).entries() {
-    if lowercase(trim(to_string(entry.key))) == wanted {
-      return trim(to_string(entry.value))
-    }
-  }
-  return nil
+  // Reverse aliases so the original first matching field still wins.
+  const pairs = (headers ?? {}).entries().reversed().map(
+    { entry -> [lowercase(trim(to_string(entry.key))), trim(to_string(entry.value))] },
+  )
+  return connector_http_header(dict_from_pairs(pairs), name)
 }
 
 /** Return the first candidate that is non-nil and non-blank as a string. */

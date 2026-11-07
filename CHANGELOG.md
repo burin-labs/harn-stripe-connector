@@ -5,6 +5,10 @@ this file. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0
 
 ## [Unreleased]
 
+- Require Harn 0.10.190 and share its canonical URL host validation, including
+  alternate-form loopback addresses, while retaining connector error codes.
+- Share HTTP header lookup while preserving trimmed fields and first-match precedence.
+
 ### Fixed
 
 - Move connector lifecycle, inbound normalization, outbound calls, state,

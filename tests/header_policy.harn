@@ -1,0 +1,26 @@
+import { init, normalize_inbound, shutdown } from "../src/lib"
+import { fixture_raw } from "../testdata/helpers"
+
+pipeline test_header_normalization_preserves_first_match_and_signed_webhooks(harness: Harness) {
+  shutdown(harness)
+  init(harness, {webhook_secret: "header-secret"})
+  const raw = fixture_raw(pick(harness, ["clock", "fs"]), "invoice_paid", "header-secret")
+  const ordinary = normalize_inbound(harness, raw)
+  assert_eq(ordinary.type, "event")
+  const aliases = dict_from_pairs(
+    raw.headers.entries().map(
+      { entry -> [" " + uppercase(entry.key) + " ", " " + entry.value + " "] },
+    ),
+  )
+  const collisions = aliases + raw.headers.map_values({ _value -> "wrong" })
+  for headers in [aliases, collisions] {
+    const accepted = normalize_inbound(harness, raw + {headers: headers})
+    assert_eq(accepted.type, "event")
+    assert_eq(accepted.event.kind, ordinary.event.kind)
+  }
+  for headers in [{unrelated: "ignored"}, nil] {
+    const refused = normalize_inbound(harness, raw + {headers: headers})
+    assert_eq(refused.type, "reject")
+  }
+  shutdown(harness)
+}

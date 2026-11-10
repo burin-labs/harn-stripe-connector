@@ -35,9 +35,9 @@ jobs:
       contents: read
       pull-requests: write
       checks: read
-    uses: burin-labs/harn-bump-fleet/.github/workflows/approve-fleet-pr.yml@4a064ec3d0a1cb77438c7dfaf921153d19655933
+    uses: burin-labs/harn-bump-fleet/.github/workflows/approve-fleet-pr.yml@e715588d2e96bf81df684568fb525ee01866398c
     with:
-      source_ref: 4a064ec3d0a1cb77438c7dfaf921153d19655933
+      source_ref: e715588d2e96bf81df684568fb525ee01866398c
       pull_request: ${{ github.event.pull_request.number || '' }}
   ship:
     needs: [approve]

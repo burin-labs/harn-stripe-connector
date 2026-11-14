@@ -24,7 +24,9 @@ jobs:
     with:
       orchestration-sha: 5584191b5e34eaa945d36206a844a54fc565b301
       version: ${{ inputs.version }}
+      pr-title: "[CI] Bump Harn runtime"
       validate-command: harn package verify .
+      test-inventory-mode: package
       publish-failure-for-repair: true
       apply-behavior-preserving-fixes: true
       behavior-preserving-fix-exclude-codes: "HARN-LNT-051"

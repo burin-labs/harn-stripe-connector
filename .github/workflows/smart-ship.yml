@@ -42,7 +42,7 @@ jobs:
   ship:
     needs: [approve]
     if: ${{ !cancelled() }}
-    uses: burin-labs/.github/.github/workflows/smart-ship.yml@7e287a6cfa82db8fd7c253120b2f13dcce34b2b9
+    uses: burin-labs/.github/.github/workflows/smart-ship.yml@0ff795599056e9ff1cfb8d4992529187e5dde06c
     with:
       repair: false
     secrets:
